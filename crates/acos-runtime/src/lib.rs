@@ -463,6 +463,8 @@ mod tests {
 
     #[tokio::test]
     async fn runtime_executes_pipeline_and_produces_report_artifact() {
+        std::env::remove_var("LONGCAT_API_KEY");
+        std::env::remove_var("ANTHROPIC_API_KEY");
         let dir = std::env::temp_dir().join(format!("acos-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("a.csv"), "name,value\nalpha,1\nbeta,2\n").unwrap();

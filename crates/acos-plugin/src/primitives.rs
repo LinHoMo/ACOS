@@ -8,11 +8,6 @@ use acos_core::traits::{CapabilityDesc, Primitive};
 use acos_core::types::{EffectDecl, EffectKind};
 use acos_core::types::{TypedValue, ValueType};
 
-/// A no-op-ish primitive that always succeeds with the given capability.
-///
-/// The five MVP primitives are: `search`, `read_file`, `write_file`,
-/// `execute_python`, `summarize`.
-
 /// `search` — network read; returns an empty document list for MVP.
 pub struct SearchPrimitive;
 
@@ -42,7 +37,6 @@ impl Primitive for SearchPrimitive {
     }
 
     async fn invoke(&self, _input: TypedValue) -> Result<TypedValue, AcosError> {
-        // MVP: return an empty document list.
         Ok(TypedValue {
             value_type: ValueType::List,
             payload: serde_json::json!([]),
@@ -162,7 +156,6 @@ impl Primitive for WriteFilePrimitive {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        // Ensure parent directory exists.
         if let Some(parent) = std::path::Path::new(path).parent() {
             tokio::fs::create_dir_all(parent).await.ok();
         }
@@ -196,8 +189,6 @@ impl Primitive for WriteFilePrimitive {
 }
 
 /// `execute_python` — process execution of Python code (process spawn).
-///
-/// Requires a `python3`/`python` on PATH. Fails clearly when unavailable.
 pub struct ExecutePythonPrimitive;
 
 impl std::fmt::Debug for ExecutePythonPrimitive {
@@ -242,7 +233,6 @@ impl Primitive for ExecutePythonPrimitive {
                 primitive_id: Some("execute_python".into()),
             })?;
 
-        // Find a python interpreter.
         let python = ["python3", "python", "py"]
             .iter()
             .find(|cmd| which(cmd))
@@ -287,16 +277,30 @@ impl Primitive for ExecutePythonPrimitive {
     }
 }
 
-/// `summarize` — text summarization (model inference for real deployments).
+/// `summarize` — text summarization backed by Claude (via LongCat).
 ///
-/// For the MVP, this performs a deterministic, dependency-free summarization:
-/// it concatenates input documents and produces a compact summary. This keeps
-/// the MVP verifiable without an LLM provider.
-pub struct SummarizePrimitive;
+/// When the `LONGCAT_API_KEY` (or `ANTHROPIC_API_KEY`) environment variable is
+/// set, this primitive sends the document to Claude and returns a real
+/// summary. Otherwise it falls back to a deterministic local summary so the
+/// runtime still works offline.
+pub struct SummarizePrimitive {
+    llm: Option<acos_llm::LongCatClient>,
+}
+
+impl SummarizePrimitive {
+    /// Creates a summarize primitive, using an LLM if configured.
+    pub fn new() -> Self {
+        let llm = acos_llm::LongCatClient::from_env().ok();
+        Self { llm }
+    }
+}
 
 impl std::fmt::Debug for SummarizePrimitive {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SummarizePrimitive")
+        match &self.llm {
+            Some(client) => write!(f, "SummarizePrimitive(llm={})", client.model()),
+            None => write!(f, "SummarizePrimitive(local)"),
+        }
     }
 }
 
@@ -316,22 +320,13 @@ impl Primitive for SummarizePrimitive {
     }
 
     async fn invoke(&self, input: TypedValue) -> Result<TypedValue, AcosError> {
-        // Accept either a single document or a list of documents.
-        let text = if let Some(docs) = input.payload.as_array() {
-            docs.iter()
-                .filter_map(|d| d.get("content").and_then(Value::as_str))
-                .collect::<Vec<_>>()
-                .join("\n\n")
-        } else {
-            input
-                .payload
-                .get("content")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string()
+        let text = extract_text(&input);
+
+        let summary = match &self.llm {
+            Some(llm) => llm_summarize(llm, &text).await?,
+            None => summarize_text(&text),
         };
 
-        let summary = summarize_text(&text);
         Ok(TypedValue {
             value_type: ValueType::Scalar,
             payload: serde_json::json!({ "summary": summary }),
@@ -347,10 +342,30 @@ impl Primitive for SummarizePrimitive {
     }
 }
 
-/// Deterministic, dependency-free summarization for the MVP.
-///
-/// Counts non-empty lines and characters and returns a compact summary. This
-/// is intentionally simple so the MVP is verifiable without an LLM.
+/// Calls Claude to produce a concise summary of the given text.
+async fn llm_summarize(llm: &acos_llm::LongCatClient, text: &str) -> Result<String, AcosError> {
+    let system = "You are a concise summarizer. Produce a clear, accurate summary of the given text in Chinese. Be specific; do not invent facts. Keep it to 2-4 sentences unless the input is long.";
+    let user = format!("请总结以下文本：\n\n{text}");
+    llm.complete(system, &user).await
+}
+
+/// Extracts readable text from a TypedValue (single doc, doc list, or raw).
+fn extract_text(input: &TypedValue) -> String {
+    if let Some(docs) = input.payload.as_array() {
+        docs.iter()
+            .filter_map(|d| d.get("content").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    } else if let Some(content) = input.payload.get("content").and_then(Value::as_str) {
+        content.to_string()
+    } else if let Some(summary) = input.payload.get("summary").and_then(Value::as_str) {
+        summary.to_string()
+    } else {
+        input.payload.to_string()
+    }
+}
+
+/// Deterministic, dependency-free summarization fallback.
 fn summarize_text(text: &str) -> String {
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     let char_count: usize = lines.iter().map(|l| l.len()).sum();
@@ -363,9 +378,7 @@ fn summarize_text(text: &str) -> String {
         .collect::<Vec<_>>()
         .join(" | ");
 
-    format!(
-        "Summary: {line_count} lines, {char_count} chars. Preview: {preview}"
-    )
+    format!("Summary: {line_count} lines, {char_count} chars. Preview: {preview}")
 }
 
 /// Returns true if `cmd` is resolvable on PATH.

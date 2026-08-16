@@ -21,12 +21,15 @@ pub struct BuiltinRegistry {
 impl BuiltinRegistry {
     /// Creates a registry with all five built-in primitives registered.
     pub fn new() -> Self {
+        // SummarizePrimitive now carries an optional LLM client, so build an
+        // instance to read its capability descriptor.
+        let summarize = SummarizePrimitive::new();
         let capabilities = vec![
             SearchPrimitive.capability(),
             ReadFilePrimitive.capability(),
             WriteFilePrimitive.capability(),
             ExecutePythonPrimitive.capability(),
-            SummarizePrimitive.capability(),
+            summarize.capability(),
         ];
         Self { capabilities }
     }
@@ -50,7 +53,7 @@ impl PluginRegistry for BuiltinRegistry {
             "read_file" => Ok(Box::new(ReadFilePrimitive)),
             "write_file" => Ok(Box::new(WriteFilePrimitive)),
             "execute_python" => Ok(Box::new(ExecutePythonPrimitive)),
-            "summarize" => Ok(Box::new(SummarizePrimitive)),
+            "summarize" => Ok(Box::new(SummarizePrimitive::new())),
             other => Err(AcosError::ValidationFailure {
                 message: format!("unknown primitive capability: {other}"),
             }),
@@ -58,7 +61,6 @@ impl PluginRegistry for BuiltinRegistry {
     }
 
     async fn load(&self, manifest: PrimitiveManifest) -> Result<PrimitiveId, AcosError> {
-        // MVP: only built-in primitives are supported; manifest must match one.
         let id = &manifest.id;
         if self.capabilities.iter().any(|c| &c.id == id) {
             Ok(PrimitiveId::new())
@@ -70,7 +72,6 @@ impl PluginRegistry for BuiltinRegistry {
     }
 
     async fn unload(&self, _id: PrimitiveId) -> Result<(), AcosError> {
-        // MVP: built-in primitives are always present; unload is a no-op.
         Ok(())
     }
 }
@@ -81,6 +82,8 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_and_invoke_read_file_and_summarize() {
+        std::env::remove_var("LONGCAT_API_KEY");
+        std::env::remove_var("ANTHROPIC_API_KEY");
         let reg = BuiltinRegistry::new();
         assert_eq!(reg.list().len(), 5);
 

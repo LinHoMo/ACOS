@@ -75,6 +75,10 @@ async fn mvp_mini_csv_pipeline_compiles_executes_and_verifies() {
         input.path = dir.join(format!("sales_{n}.csv")).to_string_lossy().to_string();
     }
 
+    // Ensure the deterministic pipeline is tested without external LLM.
+    std::env::remove_var("LONGCAT_API_KEY");
+    std::env::remove_var("ANTHROPIC_API_KEY");
+
     // 1. Compile.
     let compiler = acos_compiler::RuleCompiler::new();
     let result = compiler.compile(task).await.expect("compile");
