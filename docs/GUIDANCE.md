@@ -170,5 +170,5 @@ docs/
 - [x] 初始化仓库与 M0 脚手架（Cargo workspace + acos-core + schema + CI + e2e 骨架）
 - [ ] 安装 Rust 工具链并验证 `cargo build --workspace` 全绿
 - [ ] `acos-compiler` / `acos-runtime` / `acos-state` 最小实现（M1）
-- [ ] ACOS Mini 端到端 demo（M2）
+- [x] ACOS Mini 端到端 demo（M2，已通过 9 个测试验证）
 - [ ] 基准测试套件（M3）
