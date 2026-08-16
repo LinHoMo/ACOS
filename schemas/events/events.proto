@@ -1,0 +1,40 @@
+// ACOS Event Envelope v0.1
+//
+// Events are the source of truth for state. All state is a deterministic
+// projection of the append-oriented event log.
+//
+// Core invariant: "model-visible means logged" — any input that reached a
+// model must be reconstructible from the event log.
+//
+// See docs/specs/state_and_event_model.md
+
+syntax = "proto3";
+
+package acos.events.v1;
+
+option csharp_namespace = "Acos.Events.V1";
+option go_package = "acos/events/v1;eventsv1";
+option java_package = "io.acos.events.v1";
+
+// A persisted event in the event log.
+message Event {
+  uint64 seq = 1;
+  string run_id = 2;
+  string event_type = 3;
+  bytes payload = 4; // JSON-encoded event payload
+  int64 timestamp_ms = 5;
+}
+
+// An experience record — emitted after a run completes.
+//
+// MVP: append-only, NOT fed back into compilation until Phase 3
+// (gated by the `experience-feedback` feature flag).
+message ExperienceRecord {
+  string task_signature = 1;
+  string program_hash = 2;
+  repeated string used_capabilities = 3;
+  double cost = 4;
+  uint64 latency_ms = 5;
+  bool success = 6;
+  string compact_summary = 7;
+}

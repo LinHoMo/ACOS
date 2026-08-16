@@ -1,0 +1,59 @@
+# ACOS gitignore
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+uv.lock
+
+# Node / TypeScript
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.pnpm-debug.log*
+.npm/
+.eslintcache
+
+# IDE / Editor
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ACOS local runtime state
+*.acos.db
+*.acos.db-*
+.acos-data/
+acos.log
+
+# Build artifacts
+*.exe
+*.dll
+*.dylib
+*.so
+*.wasm
+
+# Keep directory structure
+!.gitkeep

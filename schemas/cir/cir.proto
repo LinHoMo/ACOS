@@ -1,0 +1,65 @@
+// ACOS Cognitive Intermediate Representation (CIR) v0.1
+//
+// CIR bridges task understanding and executable graph generation. It is the
+// stable contract between the compiler and the runtime.
+//
+// See docs/specs/cir_spec.md
+
+syntax = "proto3";
+
+package acos.cir.v1;
+
+option csharp_namespace = "Acos.Cir.V1";
+option go_package = "acos/cir/v1;cirv1";
+option java_package = "io.acos.cir.v1";
+
+// A compiled cognitive program (the CIR).
+message CirProgram {
+  string id = 1;
+  string task_id = 2;
+  repeated string entry = 3;
+  repeated CirNode nodes = 4;
+  repeated EffectDecl effects = 5;
+}
+
+// A node kind.
+enum CirNodeKind {
+  CIR_NODE_KIND_UNSPECIFIED = 0;
+  CIR_NODE_KIND_PRIMITIVE_INVOCATION = 1;
+  CIR_NODE_KIND_SEQUENCE = 2;
+  CIR_NODE_KIND_PARALLEL = 3;
+  CIR_NODE_KIND_CONDITIONAL = 4;
+  CIR_NODE_KIND_LOOP_MAP = 5;
+  CIR_NODE_KIND_RETRY = 6;
+  CIR_NODE_KIND_CHECKPOINT = 7;
+  CIR_NODE_KIND_VERIFICATION = 8;
+  CIR_NODE_KIND_ARTIFACT_REF = 9;
+}
+
+// A single node in the CIR graph.
+message CirNode {
+  CirNodeKind kind = 1;
+  string node_id = 2;
+  optional string primitive_id = 3;
+  optional string output = 4;
+  repeated string children = 5;
+}
+
+// An effect kind.
+enum EffectKind {
+  EFFECT_KIND_UNSPECIFIED = 0;
+  EFFECT_KIND_FS_READ = 1;
+  EFFECT_KIND_FS_WRITE = 2;
+  EFFECT_KIND_NETWORK_READ = 3;
+  EFFECT_KIND_NETWORK_WRITE = 4;
+  EFFECT_KIND_PROCESS_SPAWN = 5;
+  EFFECT_KIND_SECRET_READ = 6;
+  EFFECT_KIND_EXTERNAL_IRREVERSIBLE = 7;
+}
+
+// A declared effect with its compensation info.
+message EffectDecl {
+  EffectKind kind = 1;
+  string description = 2;
+  bool reversible = 3;
+}

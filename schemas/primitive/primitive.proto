@@ -1,0 +1,49 @@
+// ACOS Cognitive Primitive Specification v0.1
+//
+// A cognitive primitive is the smallest reusable unit of schedulable
+// cognitive work. Each primitive declares its capability, typed I/O,
+// explicit effects, and compensations.
+//
+// See docs/specs/cognitive_primitive_spec.md
+
+syntax = "proto3";
+
+package acos.primitive.v1;
+
+option csharp_namespace = "Acos.Primitive.V1";
+option go_package = "acos/primitive/v1;primitivev1";
+option java_package = "io.acos.primitive.v1";
+
+import "cir/cir.proto";
+
+// A primitive provider manifest (used by the plugin registry).
+message PrimitiveManifest {
+  string api_version = 1;
+  string id = 2;
+  string version = 3;
+  string capability = 4;
+  string input_type = 5;
+  string output_type = 6;
+  repeated cir.v1.EffectDecl effects = 7;
+  string runtime = 8;
+  string command = 9;
+}
+
+// A capability description.
+message CapabilityDesc {
+  string id = 1;
+  string name = 2;
+  string input_type = 3;
+  string output_type = 4;
+}
+
+// A primitive invoke request (runtime RPC).
+message InvokeRequest {
+  string primitive_id = 1;
+  bytes input = 2; // JSON-encoded TypedValue
+}
+
+// A primitive invoke response (runtime RPC).
+message InvokeResponse {
+  bytes output = 1; // JSON-encoded TypedValue
+}

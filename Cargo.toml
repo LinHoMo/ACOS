@@ -1,0 +1,38 @@
+# ACOS — Cargo workspace root
+# See repository_structure.md (docs/internal/repository_structure.md) for layout rationale.
+
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.81"
+license = "TBD"
+authors = ["ACOS Contributors"]
+repository = "https://github.com/acos/acos"
+description = "Artificial Cognitive Orchestration System — a pluginized cognitive runtime with a compilation layer."
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+rust_2018_idioms = "deny"
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"
+# Allow select pedantic lints that are too noisy for MVP
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+
+# Feature flags used to isolate not-yet-stable subsystems.
+[workspace.metadata.acos]
+experience-feedback = false
+
+# Binary-size and dependency profiles for the MVP.
+[profile.release]
+opt-level = 2
+lto = "thin"
+codegen-units = 1
+strip = true

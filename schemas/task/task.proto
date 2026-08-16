@@ -1,0 +1,57 @@
+// ACOS Cognitive Task Specification v0.1
+//
+// The task specification is the stable front-end input to the compiler.
+// It uses a hybrid natural-language + structured representation.
+//
+// See docs/specs/task_spec.md
+
+syntax = "proto3";
+
+package acos.task.v1;
+
+option csharp_namespace = "Acos.Task.V1";
+option go_package = "acos/task/v1;taskv1";
+option java_package = "io.acos.task.v1";
+
+// A cognitive task specification.
+message TaskSpec {
+  string api_version = 1;
+  string id = 2;
+  string goal = 3;
+  repeated TaskInput inputs = 4;
+  repeated TaskOutput outputs = 5;
+  optional TaskConstraints constraints = 6;
+  optional OptimizationGoal optimization = 7;
+  optional ApprovalPolicy approval = 8;
+}
+
+// A single task input.
+message TaskInput {
+  string type = 1;
+  string path = 2;
+  optional string format = 3;
+}
+
+// A single task output.
+message TaskOutput {
+  string type = 1;
+  optional string format = 2;
+}
+
+// Execution constraints.
+message TaskConstraints {
+  optional uint64 timeout_seconds = 1;
+  optional double max_cost = 2;
+  optional bool allowed_network = 3;
+}
+
+// Optimization intent.
+message OptimizationGoal {
+  string primary = 1;
+  optional string secondary = 2;
+}
+
+// Approval policy for external side effects.
+message ApprovalPolicy {
+  string external_side_effects = 1;
+}
