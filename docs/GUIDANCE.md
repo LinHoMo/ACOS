@@ -167,8 +167,8 @@ docs/
 - [x] 给 12 个 spec 文件加 frontmatter
 - [x] 给 10 个 guide 文件加 frontmatter
 - [x] 新增 `docs/GUIDANCE.md`（本文件）
-- [ ] 初始化仓库与 M0 脚手架（待执行）
-- [ ] `acos-core` trait 骨架与 schema（待执行）
-- [ ] 第一个端到端测试骨架（待执行）
+- [x] 初始化仓库与 M0 脚手架（Cargo workspace + acos-core + schema + CI + e2e 骨架）
+- [ ] 安装 Rust 工具链并验证 `cargo build --workspace` 全绿
+- [ ] `acos-compiler` / `acos-runtime` / `acos-state` 最小实现（M1）
 - [ ] ACOS Mini 端到端 demo（M2）
 - [ ] 基准测试套件（M3）
