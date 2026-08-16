@@ -1,0 +1,26 @@
+[package]
+name = "acos-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "ACOS command-line interface."
+
+[dependencies]
+acos-core = { path = "../acos-core" }
+acos-compiler = { path = "../acos-compiler" }
+acos-runtime = { path = "../acos-runtime" }
+acos-state = { path = "../acos-state" }
+acos-plugin = { path = "../acos-plugin" }
+acos-verify = { path = "../acos-verify" }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[features]
+default = ["in-memory"]
+in-memory = ["acos-runtime/in-memory", "acos-state/in-memory", "acos-plugin/in-memory", "acos-verify/in-memory"]
+
+[[bin]]
+name = "acos"
+path = "src/main.rs"

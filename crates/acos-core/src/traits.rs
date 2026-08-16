@@ -4,13 +4,15 @@
 //! and plugin layers. Each layer depends only on these traits (from
 //! `acos-core`), never on another layer's concrete type.
 //!
-//! See `docs/internal/architecture.md` § 设计规则：机制与策略分离.
+//! All traits use `#[async_trait]` so they remain object-safe (usable as
+//! `dyn Trait`). See `docs/internal/architecture.md`.
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AcosError;
 use crate::id::{ArtifactId, PrimitiveId, RunId};
-use crate::types::{EffectDecl, TaskSpec, TypedValue};
+use crate::types::{CirProgram, EffectDecl, TaskSpec, TypedValue};
 
 // ── Primitive ────────────────────────────────────────────────────────────────
 
@@ -27,9 +29,26 @@ pub struct CapabilityDesc {
     pub output_type: String,
 }
 
+/// A primitive invoke request (runtime RPC / in-process).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct InvokeRequest {
+    /// Primitive id.
+    pub primitive_id: String,
+    /// JSON-encoded input.
+    pub input: serde_json::Value,
+}
+
+/// A primitive invoke response.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct InvokeResponse {
+    /// JSON-encoded output.
+    pub output: serde_json::Value,
+}
+
 /// A cognitive primitive — the smallest unit of schedulable cognitive work.
 ///
 /// See `docs/specs/cognitive_primitive_spec.md`.
+#[async_trait]
 pub trait Primitive: Send + Sync + std::fmt::Debug {
     /// Returns this primitive's capability description.
     fn capability(&self) -> CapabilityDesc;
@@ -37,23 +56,15 @@ pub trait Primitive: Send + Sync + std::fmt::Debug {
     /// Returns the effects this primitive may have.
     fn effects(&self) -> Vec<EffectDecl>;
 
-    /// Invokes the primitive with the given input.
-    ///
-    /// Returns the output value, or a [`AcosError::PrimitiveFailure`].
-    fn invoke(
-        &self,
-        input: TypedValue,
-    ) -> impl std::future::Future<Output = Result<TypedValue, AcosError>> + Send;
+    /// Invokes the primitive with the given input value.
+    async fn invoke(&self, input: TypedValue) -> Result<TypedValue, AcosError>;
 
-    /// Returns the compensation for an effect, if reversible.
-    ///
-    /// Irreversible effects (`external.irreversible`) return `None` and must
-    /// be gated by approval instead.
-    fn compensation(&self, effect: &EffectDecl) -> Option<CompensationFn>;
+    /// Returns whether this primitive has a compensation for the given effect.
+    fn has_compensation(&self, effect: &EffectDecl) -> bool;
+
+    /// Executes the compensation for a performed effect.
+    async fn compensate(&self, effect: &EffectDecl, input: TypedValue) -> Result<(), AcosError>;
 }
-
-/// A compensation (rollback) function for a reversible effect.
-pub type CompensationFn = Box<dyn Fn() -> Result<(), AcosError> + Send + Sync>;
 
 // ── Compiler ─────────────────────────────────────────────────────────────────
 
@@ -61,7 +72,7 @@ pub type CompensationFn = Box<dyn Fn() -> Result<(), AcosError> + Send + Sync>;
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompileResult {
     /// The compiled CIR program.
-    pub program: crate::types::CirProgram,
+    pub program: CirProgram,
     /// Compile-time diagnostics (warnings, notes).
     pub diagnostics: Vec<Diagnostic>,
 }
@@ -90,12 +101,10 @@ pub enum DiagnosticLevel {
 /// The cognitive compiler: turns a task spec into a validated CIR program.
 ///
 /// See `docs/specs/cir_spec.md` and `docs/internal/compiler_design.md`.
+#[async_trait]
 pub trait Compiler: Send + Sync + std::fmt::Debug {
     /// Compiles a task specification into a CIR program.
-    fn compile(
-        &self,
-        task: TaskSpec,
-    ) -> impl std::future::Future<Output = Result<CompileResult, AcosError>> + Send;
+    async fn compile(&self, task: TaskSpec) -> Result<CompileResult, AcosError>;
 }
 
 // ── Runtime ──────────────────────────────────────────────────────────────────
@@ -125,30 +134,19 @@ pub enum RunStatus {
 /// The cognitive runtime: executes CIR programs durably.
 ///
 /// See `docs/specs/runtime_model.md` and `docs/specs/execution_model.md`.
+#[async_trait]
 pub trait Runtime: Send + Sync + std::fmt::Debug {
     /// Submits a program for execution, returning a handle.
-    fn submit(
-        &self,
-        program: crate::types::CirProgram,
-    ) -> impl std::future::Future<Output = Result<RunHandle, AcosError>> + Send;
+    async fn submit(&self, program: CirProgram) -> Result<RunHandle, AcosError>;
 
     /// Polls the status of a run.
-    fn poll(
-        &self,
-        handle: RunHandle,
-    ) -> impl std::future::Future<Output = Result<RunStatus, AcosError>> + Send;
+    async fn poll(&self, handle: RunHandle) -> Result<RunStatus, AcosError>;
 
     /// Requests a checkpoint for a run.
-    fn checkpoint(
-        &self,
-        handle: RunHandle,
-    ) -> impl std::future::Future<Output = Result<(), AcosError>> + Send;
+    async fn checkpoint(&self, handle: RunHandle) -> Result<(), AcosError>;
 
     /// Triggers compensation for a run's effects.
-    fn compensate(
-        &self,
-        handle: RunHandle,
-    ) -> impl std::future::Future<Output = Result<(), AcosError>> + Send;
+    async fn compensate(&self, handle: RunHandle) -> Result<(), AcosError>;
 }
 
 // ── Event store ──────────────────────────────────────────────────────────────
@@ -169,45 +167,34 @@ pub struct Event {
 /// The append-only event store — the source of truth for state.
 ///
 /// See `docs/specs/state_and_event_model.md`.
+#[async_trait]
 pub trait EventStore: Send + Sync + std::fmt::Debug {
     /// Appends an event to the log.
-    fn append(
+    async fn append(
         &self,
         run_id: RunId,
         event_type: String,
         payload: serde_json::Value,
-    ) -> impl std::future::Future<Output = Result<Event, AcosError>> + Send;
+    ) -> Result<Event, AcosError>;
 
     /// Queries events for a run.
-    fn query(
-        &self,
-        run_id: RunId,
-    ) -> impl std::future::Future<Output = Result<Vec<Event>, AcosError>> + Send;
+    async fn query(&self, run_id: RunId) -> Result<Vec<Event>, AcosError>;
 
     /// Replays all events for a run in order.
-    fn replay(
-        &self,
-        run_id: RunId,
-    ) -> impl std::future::Future<Output = Result<Vec<Event>, AcosError>> + Send;
+    async fn replay(&self, run_id: RunId) -> Result<Vec<Event>, AcosError>;
 }
 
 // ── Artifact store ───────────────────────────────────────────────────────────
 
 /// The artifact store — persists produced outputs.
+#[async_trait]
 pub trait ArtifactStore: Send + Sync + std::fmt::Debug {
     /// Stores an artifact and returns its id.
-    fn put(
-        &self,
-        run_id: RunId,
-        name: String,
-        content: Vec<u8>,
-    ) -> impl std::future::Future<Output = Result<ArtifactId, AcosError>> + Send;
+    async fn put(&self, run_id: RunId, name: String, content: Vec<u8>)
+        -> Result<ArtifactId, AcosError>;
 
     /// Retrieves an artifact by id.
-    fn get(
-        &self,
-        id: ArtifactId,
-    ) -> impl std::future::Future<Output = Result<Vec<u8>, AcosError>> + Send;
+    async fn get(&self, id: ArtifactId) -> Result<Vec<u8>, AcosError>;
 }
 
 // ── Plugin registry ──────────────────────────────────────────────────────────
@@ -215,27 +202,19 @@ pub trait ArtifactStore: Send + Sync + std::fmt::Debug {
 /// The plugin registry — manages primitive provider lifecycle.
 ///
 /// See `docs/specs/plugin_system.md`.
+#[async_trait]
 pub trait PluginRegistry: Send + Sync + std::fmt::Debug {
     /// Lists all registered primitives.
     fn list(&self) -> Vec<CapabilityDesc>;
 
     /// Finds a primitive by capability id.
-    fn resolve(
-        &self,
-        capability_id: &str,
-    ) -> impl std::future::Future<Output = Result<Box<dyn Primitive>, AcosError>> + Send;
+    async fn resolve(&self, capability_id: &str) -> Result<Box<dyn Primitive>, AcosError>;
 
     /// Hot-loads a primitive provider.
-    fn load(
-        &self,
-        manifest: PrimitiveManifest,
-    ) -> impl std::future::Future<Output = Result<PrimitiveId, AcosError>> + Send;
+    async fn load(&self, manifest: PrimitiveManifest) -> Result<PrimitiveId, AcosError>;
 
     /// Hot-unloads a primitive provider.
-    fn unload(
-        &self,
-        id: PrimitiveId,
-    ) -> impl std::future::Future<Output = Result<(), AcosError>> + Send;
+    async fn unload(&self, id: PrimitiveId) -> Result<(), AcosError>;
 }
 
 /// A primitive provider manifest (MVP wire format).

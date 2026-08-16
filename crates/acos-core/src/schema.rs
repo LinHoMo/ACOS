@@ -19,7 +19,6 @@ pub fn from_json<T: DeserializeOwned>(data: &str) -> Result<T, AcosError> {
 }
 
 /// Loads a YAML-serializable value from a string.
-#[cfg(feature = "yaml")]
 pub fn from_yaml<T: DeserializeOwned>(data: &str) -> Result<T, AcosError> {
     serde_yaml::from_str(data).map_err(|e| AcosError::ValidationFailure {
         message: format!("YAML parse error: {e}"),

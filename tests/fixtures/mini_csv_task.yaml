@@ -3,42 +3,45 @@
 # This is the canonical MVP task fixture, matching the "必需演示" in
 # docs/specs/mvp_spec.md. Used by the e2e test skeleton
 # (crates/acos-core/tests/e2e_mini.rs).
+#
+# NOTE: this uses the flat TaskSpec shape (no `spec.` nesting) so it
+# deserializes directly into acos_core::types::TaskSpec.
 
 apiVersion: acos.io/v1
+id: "550e8400-e29b-41d4-a716-446655440000"
 kind: CognitiveTask
 metadata:
   id: mini-csv-pipeline
-spec:
-  goal: >-
-    Analyze five CSV files. For each file, detect malformed columns,
-    clean them if needed, compute key statistics, aggregate results,
-    generate a markdown report, and request approval before sending
-    the report externally.
-  inputs:
-    - type: File
-      path: ./data/sales_1.csv
-      format: csv
-    - type: File
-      path: ./data/sales_2.csv
-      format: csv
-    - type: File
-      path: ./data/sales_3.csv
-      format: csv
-    - type: File
-      path: ./data/sales_4.csv
-      format: csv
-    - type: File
-      path: ./data/sales_5.csv
-      format: csv
-  outputs:
-    - type: Report
-      format: markdown
-  constraints:
-    timeout_seconds: 600
-    max_cost: 10.0
-    allowed_network: false
-  optimization:
-    primary: reliability
-    secondary: cost
-  approval:
-    external_side_effects: required
+goal: >-
+  Analyze five CSV files. For each file, detect malformed columns,
+  clean them if needed, compute key statistics, aggregate results,
+  generate a markdown report, and request approval before sending
+  the report externally.
+inputs:
+  - type: File
+    path: ./data/sales_1.csv
+    format: csv
+  - type: File
+    path: ./data/sales_2.csv
+    format: csv
+  - type: File
+    path: ./data/sales_3.csv
+    format: csv
+  - type: File
+    path: ./data/sales_4.csv
+    format: csv
+  - type: File
+    path: ./data/sales_5.csv
+    format: csv
+outputs:
+  - type: Report
+    format: markdown
+constraints:
+  timeout_seconds: 600
+  max_cost: 10.0
+  allowed_network: false
+optimization:
+  primary: reliability
+  secondary: cost
+approval:
+  externalSideEffects: required

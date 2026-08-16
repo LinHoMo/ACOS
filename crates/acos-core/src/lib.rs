@@ -17,4 +17,4 @@ pub mod types;
 
 pub use error::AcosError;
 pub use id::{ArtifactId, PrimitiveId, ProgramId, RunId, TaskId};
-pub use types::{Cir, CirProgram, EffectDecl, EffectKind, Task, TaskSpec, TypedValue, ValueType};
+pub use types::{CirProgram, EffectDecl, EffectKind, Task, TaskSpec, TypedValue, ValueType};

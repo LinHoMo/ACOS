@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::id::{ArtifactId, PrimitiveId, ProgramId, RunId, TaskId};
+use crate::id::{ArtifactId, ProgramId, RunId, TaskId};
 
 // ── Task specification (compiler front-end input) ────────────────────────────
 
@@ -14,6 +14,7 @@ use crate::id::{ArtifactId, PrimitiveId, ProgramId, RunId, TaskId};
 ///
 /// See `docs/specs/task_spec.md`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskSpec {
     /// API/version discriminator (e.g. `"acos.io/v1"`).
     pub api_version: String,
@@ -35,6 +36,7 @@ pub struct TaskSpec {
 
 /// A single task input.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskInput {
     /// Input type (e.g. `File`).
     #[serde(rename = "type")]
@@ -47,6 +49,7 @@ pub struct TaskInput {
 
 /// A single task output.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskOutput {
     /// Output type (e.g. `Report`).
     #[serde(rename = "type")]
@@ -57,6 +60,7 @@ pub struct TaskOutput {
 
 /// Execution constraints for a task.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskConstraints {
     /// Wall-clock timeout in seconds.
     pub timeout_seconds: Option<u64>,
@@ -68,6 +72,7 @@ pub struct TaskConstraints {
 
 /// Optimization intent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct OptimizationGoal {
     /// Primary objective.
     pub primary: String,
@@ -77,6 +82,7 @@ pub struct OptimizationGoal {
 
 /// Approval policy for external side effects.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ApprovalPolicy {
     /// Whether external side effects require approval.
     pub external_side_effects: String,
@@ -104,6 +110,7 @@ pub enum ValueType {
 
 /// A typed, opaque value flowing through the execution graph.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct TypedValue {
     /// The value's type.
     pub value_type: ValueType,
@@ -135,6 +142,7 @@ pub enum EffectKind {
 
 /// A declared effect with its compensation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct EffectDecl {
     /// The effect kind.
     pub kind: EffectKind,
@@ -172,23 +180,30 @@ pub enum CirNodeKind {
 
 /// A single node in the CIR graph.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct CirNode {
     /// Node kind.
     pub kind: CirNodeKind,
     /// Node id within the program.
     pub node_id: String,
-    /// Invoked primitive, if any.
-    pub primitive_id: Option<PrimitiveId>,
-    /// Named outputs.
+    /// Invoked primitive capability id (e.g. `"read_file"`), if any.
+    /// This is how the runtime resolves the primitive via the registry.
+    pub capability: Option<String>,
+    /// Named output binding, if any.
     pub output: Option<String>,
     /// Child node ids (for sequence/parallel/conditional/loop).
     pub children: Vec<String>,
+    /// Input bindings for primitive invocations: param name -> literal or
+    /// `$output_ref`. The runtime resolves `$ref` against the environment.
+    #[serde(default)]
+    pub inputs: std::collections::HashMap<String, String>,
 }
 
 /// A compiled cognitive program (the CIR).
 ///
 /// See `docs/specs/cir_spec.md`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct CirProgram {
     /// Program identifier.
     pub id: ProgramId,
