@@ -61,3 +61,5 @@ acos.log
 data/
 .env
 report.md
+
+.worktrees/
