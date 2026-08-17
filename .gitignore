@@ -60,3 +60,4 @@ acos.log
 .tmp/
 data/
 .env
+report.md
