@@ -57,3 +57,5 @@ acos.log
 
 # Keep directory structure
 !.gitkeep
+.tmp/
+data/

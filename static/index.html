@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ACOS Agent</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --panel: #161822;
+      --panel-2: #1c1f2e;
+      --border: #2a2e3e;
+      --text: #e6e8ee;
+      --muted: #8b90a5;
+      --accent: #6c8cff;
+      --accent-2: #4adfff;
+      --ok: #3ddc84;
+      --warn: #ffb347;
+      --err: #ff5c6c;
+      --mono: "SF Mono", "Cascadia Code", "Consolas", "Monaco", monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    header {
+      padding: 14px 22px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    header h1 {
+      font-size: 17px;
+      margin: 0;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+    header .tag {
+      font-size: 11px;
+      color: var(--accent-2);
+      border: 1px solid var(--accent-2);
+      border-radius: 10px;
+      padding: 2px 8px;
+    }
+    header .spacer { flex: 1; }
+    header label {
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+    input[type="checkbox"] { accent-color: var(--accent); }
+
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      background: var(--border);
+      overflow: hidden;
+    }
+    .pane {
+      background: var(--panel);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .pane h2 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--muted);
+      margin: 0;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel-2);
+    }
+    textarea {
+      flex: 1;
+      background: var(--bg);
+      color: var(--text);
+      border: none;
+      outline: none;
+      resize: none;
+      padding: 14px;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .toolbar {
+      padding: 10px 14px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      background: var(--panel-2);
+    }
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    button:hover { opacity: 0.85; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    button.secondary {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .log {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 14px;
+      font-family: var(--mono);
+      font-size: 12.5px;
+      line-height: 1.6;
+    }
+    .event {
+      padding: 4px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+      display: flex;
+      gap: 10px;
+    }
+    .event .icon {
+      width: 18px;
+      flex-shrink: 0;
+      text-align: center;
+    }
+    .event .body { flex: 1; word-break: break-word; }
+    .event.planning .icon { color: var(--accent); }
+    .event.planned .icon { color: var(--accent-2); }
+    .event.node .icon { color: var(--muted); }
+    .event.primitive .icon { color: var(--ok); }
+    .event.artifact .icon { color: var(--accent-2); }
+    .event.finished .icon { color: var(--ok); }
+    .event.error .icon { color: var(--err); }
+    .event .dim { color: var(--muted); }
+
+    .status-bar {
+      padding: 8px 14px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      display: flex;
+      gap: 16px;
+      background: var(--panel-2);
+    }
+    .status-bar .pill {
+      padding: 2px 10px;
+      border-radius: 10px;
+      font-weight: 500;
+    }
+    .pill.ok { background: rgba(61,220,132,0.15); color: var(--ok); }
+    .pill.err { background: rgba(255,92,108,0.15); color: var(--err); }
+    .pill.running { background: rgba(108,140,255,0.15); color: var(--accent); }
+
+    .examples {
+      padding: 8px 14px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .examples button {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 11px;
+      padding: 4px 10px;
+    }
+    .examples button:hover { color: var(--text); border-color: var(--accent); }
+
+    .empty {
+      color: var(--muted);
+      text-align: center;
+      margin-top: 60px;
+      font-size: 13px;
+    }
+    .empty .hint {
+      margin-top: 10px;
+      font-family: var(--mono);
+      font-size: 11px;
+      opacity: 0.6;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ACOS Agent</h1>
+    <span class="tag">Cognitive Runtime</span>
+    <div class="spacer"></div>
+    <label>
+      <input type="checkbox" id="useRules" />
+      使用规则规划器（无需 API key）
+    </label>
+  </header>
+
+  <main>
+    <section class="pane">
+      <h2>任务规范 / Task YAML</h2>
+      <textarea id="taskYaml" spellcheck="false" placeholder="在此输入 ACOS 任务 YAML，或点击下方示例加载...">apiVersion: acos.io/v1
+ id: "550e8400-e29b-41d4-a716-446655440001"
+ goal: "读取两个文本文件，用中文生成一份对比报告，写入 report.md"
+ inputs:
+   - type: File
+     path: ./data/rust.txt
+   - type: File
+     path: ./data/python.txt
+ outputs:
+   - type: Report
+     format: markdown</textarea>
+      <div class="examples">
+        <span style="color:var(--muted);font-size:11px;padding:4px 0;">示例：</span>
+        <button onclick="loadExample('compare')">📊 文件对比</button>
+        <button onclick="loadExample('summarize')">📝 单文件总结</button>
+        <button onclick="loadExample('analyze')">🔍 数据分析</button>
+      </div>
+      <div class="toolbar">
+        <button id="runBtn" onclick="runTask()">▶ 运行任务</button>
+        <button class="secondary" onclick="loadDataFiles()">📁 生成示例数据</button>
+        <span style="flex:1"></span>
+        <span id="runStatus" style="color:var(--muted);font-size:12px;"></span>
+      </div>
+    </section>
+
+    <section class="pane">
+      <h2>规划与执行 / Plan &amp; Execution</h2>
+      <div id="log" class="log">
+        <div class="empty">
+          点击 <strong>运行任务</strong> 开始<br />
+          Claude 将为您规划并执行任务
+          <div class="hint">Claude plans → compiles CIR → executes → produces artifacts</div>
+        </div>
+      </div>
+      <div class="status-bar">
+        <span>状态: <span id="statusText" class="pill running">就绪</span></span>
+        <span id="artifactCount"></span>
+        <span id="verifyResult"></span>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const EXAMPLES = {
+      compare: `apiVersion: acos.io/v1
+id: "550e8400-e29b-41d4-a716-446655440001"
+goal: "读取两个文本文件，用中文生成一份对比报告写入 report.md。报告需对比两者的核心特点。"
+inputs:
+  - type: File
+    path: ./data/rust.txt
+  - type: File
+    path: ./data/python.txt
+outputs:
+  - type: Report
+    format: markdown`,
+      summarize: `apiVersion: acos.io/v1
+id: "660e8400-e29b-41d4-a716-446655440002"
+goal: "读取文件 data.txt，用中文生成简洁摘要写入 report.md"
+inputs:
+  - type: File
+    path: ./data/data.txt
+outputs:
+  - type: Report
+    format: markdown`,
+      analyze: `apiVersion: acos.io/v1
+id: "770e8400-e29b-41d4-a716-446655440003"
+goal: "读取 CSV 文件 sales.csv，计算行数、列数和数值列的总和，将统计报告写入 report.md"
+inputs:
+  - type: File
+    path: ./data/sales.csv
+  - type: File
+    format: csv
+outputs:
+  - type: Report
+    format: markdown`,
+    };
+
+    function loadExample(name) {
+      document.getElementById("taskYaml").value = EXAMPLES[name];
+    }
+
+    async function loadDataFiles() {
+      // Create sample data files for examples.
+      const files = {
+        "data/rust.txt":
+          "Rust 是一种系统编程语言，专注于安全性、速度和并发性。\n它无需垃圾回收即可保证内存安全，适合构建高性能系统软件。",
+        "data/python.txt":
+          "Python 是一种高级通用编程语言，强调代码可读性。\n拥有丰富的标准库和生态，广泛用于数据科学、Web 开发和自动化。",
+        "data/data.txt":
+          "ACOS（人工认知编排系统）是一个具备认知编译层的插件化认知运行时。\n目标是将目标编译为认知程序，并对程序进行可靠执行、验证与演化。",
+        "data/sales.csv":
+          "product,units,price\nWidget A,100,9.99\nWidget B,50,19.99\nWidget C,200,4.99",
+      };
+      let created = 0;
+      for (const [path, content] of Object.entries(files)) {
+        try {
+          const resp = await fetch("/api/write-file", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ path, content }),
+          });
+          if (resp.ok) created++;
+        } catch (e) {
+          // Server may not have this endpoint; create files via run instead.
+        }
+      }
+      if (created === 0) {
+        // Fallback: tell user to create files manually.
+        alert(
+          "请在项目根目录创建 data/ 文件夹并放入示例文件：\n\n" +
+            Object.keys(files)
+              .map((p) => `  ${p}`)
+              .join("\n")
+        );
+      } else {
+        alert(`已创建 ${created} 个示例数据文件`);
+      }
+    }
+
+    function logEvent(event) {
+      const log = document.getElementById("log");
+      // Remove empty placeholder on first event.
+      const empty = log.querySelector(".empty");
+      if (empty) empty.remove();
+
+      const div = document.createElement("div");
+      div.className = "event " + event.type;
+      let icon = "•";
+      let body = "";
+      let dim = "";
+
+      switch (event.type) {
+        case "planning":
+          icon = "🧠";
+          body = `规划中: <strong>${event.planner}</strong>`;
+          break;
+        case "planned":
+          icon = "📐";
+          body = `编译完成: <strong>${event.node_count} 个节点</strong>`;
+          if (event.diagnostics?.length) {
+            dim = event.diagnostics.join("<br/>");
+          }
+          break;
+        case "node_start":
+          icon = "▸";
+          body = `执行节点 <strong>${escapeHtml(event.node_id)}</strong>`;
+          dim = event.kind;
+          break;
+        case "primitive":
+          icon = event.ok ? "✓" : "✗";
+          body = `原语 <strong>${escapeHtml(event.capability)}</strong> @ ${escapeHtml(
+            event.node_id
+          )}`;
+          break;
+        case "artifact":
+          icon = "📄";
+          body = `产出工件: <strong>${escapeHtml(event.name)}</strong>`;
+          break;
+        case "finished":
+          icon = event.status?.includes("Completed") ? "✅" : "❌";
+          body = `运行结束: <strong>${event.status}</strong>`;
+          dim = `run_id: ${event.run_id}`;
+          break;
+        case "error":
+          icon = "⚠️";
+          body = `<span style="color:var(--err)">错误: ${escapeHtml(
+            event.message
+          )}</span>`;
+          break;
+        default:
+          icon = "•";
+          body = JSON.stringify(event);
+      }
+
+      div.innerHTML = `<span class="icon">${icon}</span><span class="body">${body}${
+        dim ? `<div class="dim">${escapeHtml ? dim : dim}</div>` : ""
+      }</span>`;
+      // Fix: if dim contains HTML (from diagnostics), render as-is for that case.
+      if (event.type === "planned" && event.diagnostics?.length) {
+        div.querySelector(".body").innerHTML = `${body}${
+          dim ? `<div class="dim">${dim}</div>` : ""
+        }`;
+      }
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function setStatus(text, kind) {
+      const el = document.getElementById("statusText");
+      el.textContent = text;
+      el.className = "pill " + (kind || "running");
+    }
+
+    async function runTask() {
+      const yaml = document.getElementById("taskYaml").value;
+      const useRules = document.getElementById("useRules").checked;
+      const runBtn = document.getElementById("runBtn");
+
+      // Clear log.
+      document.getElementById("log").innerHTML = "";
+      runBtn.disabled = true;
+      setStatus("运行中...", "running");
+      document.getElementById("artifactCount").textContent = "";
+      document.getElementById("verifyResult").textContent = "";
+
+      try {
+        const resp = await fetch("/api/run", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ task_yaml: yaml, use_rules: useRules }),
+        });
+        const data = await resp.json();
+
+        // Render events.
+        const events = data.events || [];
+        events.forEach(logEvent);
+
+        // Update status bar.
+        if (data.artifacts?.length) {
+          document.getElementById("artifactCount").textContent =
+            `工件: ${data.artifacts.length} 个`;
+        }
+        if (data.verification) {
+          const v = document.getElementById("verifyResult");
+          v.textContent = `验证: ${data.verification}`;
+          v.className =
+            data.verification === "PASSED" ? "pill ok" : "pill err";
+        }
+        setStatus(
+          data.status || (resp.ok ? "完成" : "失败"),
+          resp.ok && data.status?.includes("Completed") ? "ok" : "err"
+        );
+
+        // If report.md was produced, fetch and show it.
+        if (data.artifacts?.includes("report.md")) {
+          showArtifact("report.md");
+        }
+      } catch (e) {
+        logEvent({ type: "error", message: "请求失败: " + e.message });
+        setStatus("错误", "err");
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+
+    async function showArtifact(name) {
+      try {
+        const resp = await fetch("/api/artifact?name=" + encodeURIComponent(name));
+        if (!resp.ok) return;
+        const text = await resp.text();
+        const log = document.getElementById("log");
+        const div = document.createElement("div");
+        div.className = "event artifact";
+        div.innerHTML = `<span class="icon">📄</span><span class="body"><strong>${escapeHtml(
+          name
+        )}</strong><pre style="margin:8px 0 0;padding:12px;background:var(--bg);border-radius:6px;overflow-x:auto;white-space:pre-wrap;font-size:12px;">${escapeHtml(
+          text
+        )}</pre></span>`;
+        log.appendChild(div);
+        log.scrollTop = log.scrollHeight;
+      } catch (e) {
+        // ignore
+      }
+    }
+  </script>
+</body>
+</html>
