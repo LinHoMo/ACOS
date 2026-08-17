@@ -41,15 +41,17 @@ You MUST respond with **only valid JSON** (no markdown, no commentary) matching 
 
 ```json
 {
+  "id": "<uuid>",
+  "taskId": "<uuid>",
   "entry": ["root"],
   "nodes": [
-    { "kind": "sequence", "node_id": "root", "capability": null, "output": null, "children": ["step_0"], "inputs": {} },
-    { "kind": "primitiveInvocation", "node_id": "step_0", "capability": "read_file", "output": "raw_0", "children": [], "inputs": { "path": "/tmp/data/a.txt" } },
-    { "kind": "primitiveInvocation", "node_id": "step_1", "capability": "write_file", "output": "report_ref", "children": [], "inputs": { "path": "report.md", "content": "${raw_0}" } }
+    { "kind": "sequence", "nodeId": "root", "capability": null, "output": null, "children": ["step_0"], "inputs": {} },
+    { "kind": "primitive_invocation", "nodeId": "step_0", "capability": "read_file", "output": "raw_0", "children": [], "inputs": { "path": "/tmp/data/a.txt" } },
+    { "kind": "primitive_invocation", "nodeId": "step_1", "capability": "write_file", "output": "report_ref", "children": [], "inputs": { "path": "report.md", "content": "${raw_0}" } }
   ],
   "effects": [
-    { "kind": "fsRead", "description": "read input files", "reversible": true },
-    { "kind": "fsWrite", "description": "write report artifact", "reversible": true }
+    { "kind": "fs_read", "description": "read input files", "reversible": true },
+    { "kind": "fs_write", "description": "write report artifact", "reversible": true }
   ]
 }
 ```
@@ -57,12 +59,12 @@ You MUST respond with **only valid JSON** (no markdown, no commentary) matching 
 # Rules
 
 1. `nodes` is an array. Each node has: `kind`, `node_id`, `capability` (null for containers), `output` (null unless it binds a value), `children`, `inputs`.
-2. `kind` must be exactly one of: `sequence`, `parallel`, `conditional`, `primitiveInvocation`.
+2. `kind` must be exactly one of: `sequence`, `parallel`, `conditional`, `primitive_invocation`.
 3. A top-level `sequence` container whose `children` list is the execution order is required; put its id in `entry`.
 4. Use `primitiveInvocation` for every primitive call. Set `capability` to the primitive name.
 5. To pass data between nodes, bind an `output` name on the producer and reference it as `"${outputName}"` in the consumer's `inputs`. Do NOT invent other reference syntax.
 6. `inputs` is an object mapping parameter name -> literal string or `"${reference}"`.
-7. Declare every side effect your graph uses in the `effects` array. `kind` must be one of: `fsRead`, `fsWrite`, `networkRead`, `networkWrite`, `processSpawn`, `secretRead`, `externalIrreversible`. Set `reversible: false` only for `externalIrreversible`.
+7. Declare every side effect your graph uses in the `effects` array. `kind` must be one of: `fs_read`, `fs_write`, `network_read`, `network_write`, `process_spawn`, `secret_read`, `external_irreversible`. Set `reversible: false` only for `externalIrreversible`.
 8. Choose primitives appropriate to the task. Prefer `read_file` + `summarize` + `write_file` for document/report tasks; use `execute_python` only when the task needs real computation.
 9. Do not add nodes that are not implied by the task goal.
 
@@ -122,7 +124,9 @@ impl ModelCompiler {
 
         let program: CirProgram =
             serde_json::from_value(value).map_err(|e| AcosError::CompilerFailure {
-                message: format!("CIR JSON does not match schema: {e}"),
+                message: format!("CIR JSON does not match schema: {e}
+--- raw ---
+{raw}"),
             })?;
 
         validate_cir(&program)?;
@@ -208,7 +212,7 @@ impl Compiler for RuleCompiler {
                 capability: Some("read_file".to_string()),
                 output: Some(format!("raw_{i}")),
                 children: vec![],
-                inputs: vec![("path".to_string(), input.path.clone())]
+                inputs: vec![("path".to_string(), serde_json::Value::String(input.path.clone()))]
                     .into_iter()
                     .collect(),
             });
@@ -236,7 +240,7 @@ impl Compiler for RuleCompiler {
             children: vec![],
             inputs: vec![(
                 "documents".to_string(),
-                serde_json::to_string(&raw_refs).unwrap(),
+                serde_json::Value::String(serde_json::to_string(&raw_refs).unwrap()),
             )]
             .into_iter()
             .collect(),
@@ -251,8 +255,8 @@ impl Compiler for RuleCompiler {
             output: Some("report_ref".to_string()),
             children: vec![],
             inputs: vec![
-                ("path".to_string(), "report.md".to_string()),
-                ("content".to_string(), "${report_text}".to_string()),
+                ("path".to_string(), serde_json::Value::String("report.md".to_string())),
+                ("content".to_string(), serde_json::Value::String("${report_text}".to_string())),
             ]
             .into_iter()
             .collect(),

@@ -260,19 +260,26 @@ impl RuntimeImpl {
 
         // Record artifact for write_file.
         if capability == "write_file" {
-            if let Some(path) = node.inputs.get("path") {
-                let content = node.inputs.get("content").cloned().unwrap_or_default();
-                let resolved_content = resolve_ref(&content, env).await;
+            if let Some(path_val) = node.inputs.get("path") {
+                let path_str = path_val.as_str().unwrap_or("");
+                let content_val = node.inputs.get("content").cloned().unwrap_or_default();
+                let content_str = match &content_val {
+                    Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                let resolved_content = resolve_ref(&content_str, env).await;
                 let bytes = resolved_content.into_bytes();
+                // Write to host filesystem so the artifact is usable.
+                let _ = tokio::fs::write(path_str, &bytes).await;
                 match self
                     .artifact_store
-                    .put(run_id, path.clone(), bytes)
+                    .put(run_id, path_str.to_string(), bytes)
                     .await
                 {
                     Ok(id) => {
-                        artifacts.push(path.clone());
+                        artifacts.push(path_str.to_string());
                         evidence.push(Evidence {
-                            description: format!("produced artifact {path} ({id:?})"),
+                            description: format!("produced artifact {} ({id:?})", path_str),
                             logged: true,
                         });
                     }
@@ -300,7 +307,7 @@ impl RuntimeImpl {
     /// Resolves a node's input bindings into a single TypedValue.
     async fn resolve_inputs(
         &self,
-        inputs: &HashMap<String, String>,
+        inputs: &HashMap<String, serde_json::Value>,
         env: &Arc<Mutex<HashMap<String, TypedValue>>>,
     ) -> TypedValue {
         if inputs.is_empty() {
@@ -324,33 +331,18 @@ impl RuntimeImpl {
     /// Resolves a single input value with reference substitution.
     async fn resolve_value(
         &self,
-        raw: &str,
+        raw: &serde_json::Value,
         env: &Arc<Mutex<HashMap<String, TypedValue>>>,
     ) -> TypedValue {
-        let guard = env.lock().await;
-
-        if let Some(name) = raw
-            .strip_prefix("${")
-            .and_then(|s| s.strip_suffix("}"))
-            .or_else(|| raw.strip_prefix('$'))
-        {
-            if let Some(tv) = guard.get(name) {
-                return tv.clone();
-            }
-        }
-
-        if let Ok(mut value) = serde_json::from_str::<Value>(raw) {
-            resolve_refs_in_value(&mut value, &guard);
-            return TypedValue {
-                value_type: ValueType::Record,
-                payload: value,
-            };
-        }
-
-        TypedValue {
-            value_type: ValueType::Scalar,
-            payload: Value::String(raw.to_string()),
-        }
+        let resolved = resolve_ref(raw.as_str().unwrap_or(&raw.to_string()), env).await;
+        let payload = serde_json::from_str::<Value>(&resolved)
+            .unwrap_or_else(|_| Value::String(resolved));
+        let value_type = match &payload {
+            Value::Array(_) => ValueType::List,
+            Value::Object(_) => ValueType::Record,
+            _ => ValueType::Scalar,
+        };
+        TypedValue { value_type, payload }
     }
 }
 
@@ -361,9 +353,26 @@ fn resolve_refs_in_value(value: &mut Value, env: &HashMap<String, TypedValue>) {
             if let Some(name) = s
                 .strip_prefix("${")
                 .and_then(|x| x.strip_suffix("}"))
-                .or_else(|| s.strip_prefix('$'))
+                .or_else(|| s.strip_prefix("$"))
             {
-                if let Some(tv) = env.get(name) {
+                let matched = env
+                    .get(name)
+                    .cloned()
+                    .or_else(|| {
+                        env.iter()
+                            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+                            .map(|(_, v)| v.clone())
+                    })
+                    .or_else(|| {
+                        env.iter()
+                            .find(|(k, _)| {
+                                let a = k.to_lowercase();
+                                let b = name.to_lowercase();
+                                a.contains(&b) || b.contains(&a)
+                            })
+                            .map(|(_, v)| v.clone())
+                    });
+                if let Some(tv) = matched {
                     *value = tv.payload.clone();
                 }
             }
@@ -399,38 +408,6 @@ async fn resolve_ref(ref_str: &str, env: &Arc<Mutex<HashMap<String, TypedValue>>
         }
     } else {
         ref_str.to_string()
-    }
-}
-
-// ── Runtime trait impl ───────────────────────────────────────────────────────
-
-#[async_trait]
-impl acos_core::traits::Runtime for RuntimeImpl {
-    async fn submit(&self, program: CirProgram) -> Result<RunHandle, AcosError> {
-        let report = self.execute(program).await?;
-        Ok(RunHandle(report.run_id))
-    }
-
-    async fn poll(&self, handle: RunHandle) -> Result<RunStatus, AcosError> {
-        let events = self.event_store.query(handle.0).await?;
-        Ok(events
-            .last()
-            .map(|e| match e.event_type.as_str() {
-                "run.finished" => RunStatus::Completed,
-                _ => RunStatus::Running,
-            })
-            .unwrap_or(RunStatus::Pending))
-    }
-
-    async fn checkpoint(&self, _handle: RunHandle) -> Result<(), AcosError> {
-        Ok(())
-    }
-
-    async fn compensate(&self, handle: RunHandle) -> Result<(), AcosError> {
-        self.event_store
-            .append(handle.0, "run.compensate".into(), serde_json::json!({}))
-            .await?;
-        Ok(())
     }
 }
 

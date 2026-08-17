@@ -196,7 +196,7 @@ pub struct CirNode {
     /// Input bindings for primitive invocations: param name -> literal or
     /// `$output_ref`. The runtime resolves `$ref` against the environment.
     #[serde(default)]
-    pub inputs: std::collections::HashMap<String, String>,
+    pub inputs: std::collections::HashMap<String, serde_json::Value>,
 }
 
 /// A compiled cognitive program (the CIR).
