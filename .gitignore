@@ -59,3 +59,4 @@ acos.log
 !.gitkeep
 .tmp/
 data/
+.env

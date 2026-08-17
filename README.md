@@ -21,10 +21,17 @@ ACOS = Pluginized Cognitive Runtime
 ## 状态 / Status
 
 - 版本（Version）：0.1 架构基线（architecture baseline）
-- 阶段（Stage）：M0 脚手架已完成，进入 ACOS Mini 实现
-- 主要验证目标（Primary validation target）：ACOS Mini
+- 阶段（Stage）：**ACOS Mini MVP 已完成，含 Web 端与 Claude 集成**
+- 主要验证目标（Primary validation target）：ACOS Mini ✅ 已验证
 - 架构事实的权威来源（Canonical source of architectural truth）：`docs/`
-- M0 已完成：仓库初始化、`acos-core` 接口骨架、Protobuf schema、CI 配置、首个 e2e 测试骨架
+- 已完成：
+  - ✅ M0 脚手架（仓库、workspace、CI、schema）
+  - ✅ 7 个核心 Rust crate 实现
+  - ✅ 认知编译器（规则优先 + Claude 模型辅助）
+  - ✅ 运行时执行引擎（图执行、工件、证据、验证）
+  - ✅ 12 个测试全部通过
+  - ✅ **Web 端**（`http://localhost:8080`，可直观看到 agent 规划与执行）
+  - ✅ **Claude API 集成**（龙猫代理，动态规划）
 
 ## 快速开始 / Quick start
 
@@ -34,15 +41,60 @@ ACOS = Pluginized Cognitive Runtime
 > ```
 > 安装后验证：`cargo --version` 与 `rustc --version`。
 
-```bash
-# 构建整个 workspace（含 acos-core）
-cargo build --workspace
+### 1. 构建整个 workspace
 
-# 运行 acos-core 测试（含类型 roundtrip 测试）
-cargo test -p acos-core
+```bash
+cargo build --workspace
 ```
 
-完成 M1 后，`cargo build --workspace` 将覆盖全部 7 个核心 crate。开发顺序与并行策略见 [GUIDANCE.md](docs/GUIDANCE.md)。
+### 2. 运行测试
+
+```bash
+cargo test --workspace
+```
+
+### 3. 启动 Web 端（推荐）
+
+```bash
+# 配置（可选，也可通过 .env 文件）
+export LONGCAT_API_KEY=your_api_key        # 龙猫/Anthropic API key
+export ACOS_PORT=8080                       # 可选，默认 8080
+
+# 启动服务器
+cargo run -p acos-server
+
+# 浏览器打开 http://localhost:8080
+```
+
+Web 界面支持：
+- 编辑任务 YAML（含示例模板）
+- 选择规划器：**Claude 模型辅助**（需 API key）或**规则优先**（无需 key）
+- 实时查看规划 → 编译 → 执行 → 验证全流程
+- 查看产出的工件（如 `report.md`）
+
+### 4. 命令行使用
+
+```bash
+# Claude 规划并执行
+cargo run -p acos-cli -- run task.yaml
+
+# 仅查看 Claude 生成的执行图
+cargo run -p acos-cli -- compile task.yaml
+
+# 使用规则规划器（无需 API key）
+cargo run -p acos-cli -- run task.yaml --rules
+```
+
+### 5. 配置文件（.env）
+
+复制 `.env.example` 为 `.env` 并填入：
+
+```bash
+cp .env.example .env
+# 编辑 .env 填入 LONGCAT_API_KEY 等
+```
+
+服务器启动时会自动加载 `.env`。详见 `.env.example`。
 
 ## ACOS 是什么 / What ACOS is
 
@@ -92,59 +144,68 @@ Future Compilation（反馈优化未来编译）
 
 ## MVP / 最小可行产品
 
-ACOS Mini 应当证明：自然语言目标加上结构化约束，可以通过一个小型原语集（primitive set）被编译为可靠的可执行图。
+ACOS Mini 已证明：自然语言目标加上结构化约束，可以通过一个小型原语集被编译为可靠的可执行图。
+
+当前 5 个 MVP 原语：
 
 - `search`（搜索）
 - `read_file`（读文件）
 - `write_file`（写文件）
 - `execute_python`（执行 Python）
-- `summarize`（总结）
+- `summarize`（总结，已集成 Claude）
 
-MVP 基准测试必须至少包含一个条件密集型任务（condition-heavy task），而不仅仅是简单的线性 CSV 任务。
+MVP 基准测试包含条件密集型任务（condition-heavy task），而非简单线性 CSV 任务。
 
 ## 文档导航 / Documentation map
 
 从这里开始：
 
-1. [项目概述 / Project Overview](docs/project_overview.md)
-2. [架构 / Architecture](docs/architecture.md)
-3. [技术栈 / Tech Stack](docs/tech_stack.md)
-4. [运行时模型 / Runtime Model](docs/runtime_model.md)
-5. [认知原语规范 / Cognitive Primitive Specification](docs/cognitive_primitive_spec.md)
-6. [任务规范 / Task Specification](docs/task_spec.md)
-7. [CIR 规范 / CIR Specification](docs/cir_spec.md)
-8. [编译器设计 / Compiler Design](docs/compiler_design.md)
-9. [执行模型 / Execution Model](docs/execution_model.md)
-10. [状态与事件模型 / State and Event Model](docs/state_and_event_model.md)
-11. [验证 / Verification](docs/verification.md)
-12. [经验系统 / Experience System](docs/experience_system.md)
-13. [插件系统 / Plugin System](docs/plugin_system.md)
-14. [Web UI / Web 用户界面](docs/web_ui.md)
-15. [安全 / Security](docs/security.md)
-16. [部署 / Deployment](docs/deployment.md)
-17. [平台指南 / Platform Guides](docs/platform_windows.md)、[Linux](docs/platform_linux.md)、[macOS](docs/platform_macos.md)
-18. [开发指南 / Development Guide](docs/development_guide.md)
-19. [测试策略 / Testing Strategy](docs/testing.md)
-20. [路线图 / Roadmap](docs/roadmap.md)
-21. [ADR 索引 / ADR Index](docs/adr_index.md)
+1. [项目概述 / Project Overview](docs/internal/project_overview.md)
+2. [架构 / Architecture](docs/internal/architecture.md)
+3. [技术栈 / Tech Stack](docs/internal/tech_stack.md)
+4. [运行时模型 / Runtime Model](docs/specs/runtime_model.md)
+5. [认知原语规范 / Cognitive Primitive Specification](docs/specs/cognitive_primitive_spec.md)
+6. [任务规范 / Task Specification](docs/specs/task_spec.md)
+7. [CIR 规范 / CIR Specification](docs/specs/cir_spec.md)
+8. [编译器设计 / Compiler Design](docs/internal/compiler_design.md)
+9. [执行模型 / Execution Model](docs/specs/execution_model.md)
+10. [验证 / Verification](docs/specs/verification.md)
+11. [插件系统 / Plugin System](docs/specs/plugin_system.md)
+12. [路线图 / Roadmap](docs/guides/roadmap.md)
+13. [全链路指导性建议 / Holistic Guidance](docs/GUIDANCE.md)
+14. [项目状态 / Project Status](PROJECT_STATUS.md)
+
+## 仓库结构 / Repository structure
+
+```text
+ACOS/
+├── .env.example              # 配置模板
+├── Cargo.toml                # Workspace 根
+├── crates/
+│   ├── acos-core/            # 类型、trait、错误、schema
+│   ├── acos-compiler/        # 认知编译器（规则 + 模型辅助）
+│   ├── acos-runtime/         # 运行时执行引擎
+│   ├── acos-state/           # 状态存储（内存/SQLite）
+│   ├── acos-plugin/          # 内置原语 + 注册表
+│   ├── acos-verify/          # 验证流水线
+│   ├── acos-llm/             # LLM 提供者（龙猫/Anthropic）
+│   ├── acos-cli/             # 命令行入口
+│   └── acos-server/          # Web 服务器
+├── schemas/                  # Protobuf / JSON Schema
+├── static/                   # Web 前端
+├── docs/                     # 文档（specs/guides/adrs/internal）
+└── tests/                    # 测试夹具
+```
 
 ## 设计原则 / Design principles
 
-完整设计原则见 [设计原则 / Design Principles](docs/design_principles.md)。
+完整设计原则见 [设计原则 / Design Principles](docs/internal/design_principles.md)。
 
 ### 三支柱 / Three Pillars
 
 - **Stable Core + Everything Extensible**：稳定的核心运行时 + 一切可替换能力皆以标准化插件接入
 - **Cognitive Program as First-Class Citizen**：认知程序是一等公民，Agent 只是程序的运行时执行实体
-- **Reliable by Default**：状态可追踪、执行可恢复、副作用可管理、结果可验证、过程可回放、失败可重新规划、证据可追溯
-
-## 首个版本的非目标 / Non-goals for the first release
-
-- 替代主机操作系统内核（host OS kernel）。
-- 构建通用的分布式云调度器（distributed cloud scheduler）。
-- 解决 AGI（通用人工智能）。
-- 完整的自修改代码（self-modifying code）。
-- 在本地插件契约稳定之前建立插件市场（plugin marketplace）。
+- **Reliable by Default**：状态可追踪、执行可恢复、副作用可管理、过程可回放、失败可重规划、证据可追溯
 
 ## 许可证 / License
 

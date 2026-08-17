@@ -26,6 +26,7 @@
 3. [技术栈 / Tech Stack](internal/tech_stack.md)
 4. [路线图 / Roadmap](guides/roadmap.md)
 5. [全链路指导性建议 / Holistic Guidance](GUIDANCE.md)
+6. [项目状态 / Project Status](../PROJECT_STATUS.md)
 
 ---
 

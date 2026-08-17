@@ -306,6 +306,8 @@ async fn index() -> actix_web::Result<fs::NamedFile> {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    // Load .env file if present (silently ignore if missing).
+    dotenvy::dotenv().ok();
     let port = std::env::var("ACOS_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
