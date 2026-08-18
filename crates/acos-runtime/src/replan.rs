@@ -112,7 +112,8 @@ impl RecoveryRule for OfflineFallbackRule {
 mod tests {
     use super::*;
     use acos_core::id::RunId;
-    use acos_core::types::{CirNode, CirProgram, FailureClass};
+    use acos_core::types::{CirNode, CirProgram, FailureClass, OutputSpec};
+    use std::collections::HashMap;
 
     fn program_with_search() -> CirProgram {
         CirProgram {
@@ -123,10 +124,15 @@ mod tests {
                 kind: CirNodeKind::PrimitiveInvocation,
                 node_id: "root".into(),
                 capability: Some("search".into()),
-                output: Some("results".into()),
+                output: Some(OutputSpec {
+                    name: "results".into(),
+                    type_name: "String".into(),
+                    fields: vec![],
+                }),
                 children: vec![],
                 else_children: vec![],
                 inputs: Default::default(),
+                input_types: HashMap::new(),
                 control: None,
             }],
             effects: vec![],
@@ -172,7 +178,7 @@ mod tests {
             root.inputs["path"],
             Value::String("fallback.txt".into())
         );
-        assert_eq!(root.output.as_deref(), Some("results"));
+        assert_eq!(root.output.as_ref().map(|o| o.name.as_str()), Some("results"));
     }
 
     #[test]

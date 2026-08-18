@@ -814,7 +814,7 @@ impl RuntimeImpl {
     ) {
         let Some(child_id) = node.children.last() else { return };
         let Some(child) = node_map.get(child_id) else { return };
-        let Some(out_name) = child.output.clone() else { return };
+        let Some(out_name) = child.output.as_ref().map(|o| o.name.clone()) else { return };
         let guard = env.lock().await;
         if let Some(tv) = guard.get(&out_name) {
             collected.push(tv.payload.clone());
@@ -829,7 +829,7 @@ impl RuntimeImpl {
         env: &Arc<Mutex<HashMap<String, TypedValue>>>,
         collected: Vec<serde_json::Value>,
     ) {
-        let Some(out_name) = node.output.clone() else { return };
+        let Some(out_name) = node.output.as_ref().map(|o| o.name.clone()) else { return };
         let mut guard = env.lock().await;
         guard.insert(
             out_name,
@@ -904,8 +904,8 @@ impl RuntimeImpl {
 
         let output = primitive.invoke(input_value).await?;
 
-        if let Some(name) = &node.output {
-            env.lock().await.insert(name.clone(), output.clone());
+        if let Some(name) = node.output.as_ref().map(|o| o.name.clone()) {
+            env.lock().await.insert(name, output.clone());
         }
 
         // Record artifact for write_file.
@@ -1091,8 +1091,8 @@ mod tests {
     };
     use acos_core::types::{
         CirNode, CirNodeKind, ConditionSpec, ControlSpec, EffectDecl, EffectKind, FailureClass,
-        FailureContext, LoopKind, LoopSpec, RecoveryProposal, RetryPolicy, RetryStrategy,
-        TaskInput, TaskSpec,
+        FailureContext, LoopKind, LoopSpec, OutputSpec, RecoveryProposal, RetryPolicy,
+        RetryStrategy, TaskInput, TaskSpec,
     };
     use acos_state::InMemoryStore;
 
@@ -1151,10 +1151,15 @@ mod tests {
             kind: CirNodeKind::PrimitiveInvocation,
             node_id: id.into(),
             capability: Some(capability.into()),
-            output: output.map(String::from),
+            output: output.map(|name| OutputSpec {
+                name: name.into(),
+                type_name: "String".into(),
+                fields: vec![],
+            }),
             children: vec![],
             else_children: vec![],
             inputs: HashMap::new(),
+            input_types: HashMap::new(),
             control: None,
         }
     }
@@ -1191,6 +1196,7 @@ mod tests {
                 node_id: "root".into(),
                 capability: None,
                 output: None,
+                input_types: HashMap::new(),
                 children: vec!["search".into(), "check".into(), "then_summarize".into()],
                 else_children: vec![],
                 inputs: HashMap::new(),
@@ -1202,6 +1208,7 @@ mod tests {
                 node_id: "check".into(),
                 capability: None,
                 output: None,
+                input_types: HashMap::new(),
                 children: vec!["then_summarize".into()],
                 else_children: vec!["else_write".into()],
                 inputs: HashMap::new(),
@@ -1229,6 +1236,7 @@ mod tests {
                 node_id: "root".into(),
                 capability: None,
                 output: None,
+                input_types: HashMap::new(),
                 children: vec!["check".into()],
                 else_children: vec![],
                 inputs: HashMap::new(),
@@ -1239,6 +1247,7 @@ mod tests {
                 node_id: "check".into(),
                 capability: None,
                 output: None,
+                input_types: HashMap::new(),
                 children: vec!["then_summarize".into()],
                 else_children: vec!["else_write".into()],
                 inputs: HashMap::new(),
@@ -1283,6 +1292,7 @@ mod tests {
                 node_id: "root".into(),
                 capability: None,
                 output: None,
+                input_types: HashMap::new(),
                 children: vec!["search".into(), "loop".into()],
                 else_children: vec![],
                 inputs: HashMap::new(),
@@ -1294,6 +1304,7 @@ mod tests {
                 node_id: "loop".into(),
                 capability: None,
                 output: None,
+                input_types: HashMap::new(),
                 children: vec!["body".into()],
                 else_children: vec![],
                 inputs: HashMap::new(),
@@ -1323,10 +1334,15 @@ mod tests {
             kind: CirNodeKind::LoopMap,
             node_id: "loop".into(),
             capability: None,
-            output: Some("all_results".into()),
+            output: Some(OutputSpec {
+                name: "all_results".into(),
+                type_name: "List<String>".into(),
+                fields: vec![],
+            }),
             children: vec!["body".into()],
             else_children: vec![],
             inputs: HashMap::new(),
+            input_types: HashMap::new(),
             control: Some(ControlSpec {
                 condition: None,
                 loop_spec: Some(LoopSpec {
@@ -1347,6 +1363,7 @@ mod tests {
                 node_id: "root".into(),
                 capability: None,
                 output: None,
+                input_types: HashMap::new(),
                 children: vec!["init".into(), "loop".into(), "consumer".into()],
                 else_children: vec![],
                 inputs: HashMap::new(),
@@ -1384,6 +1401,7 @@ mod tests {
                 node_id: "root".into(),
                 capability: None,
                 output: None,
+                input_types: HashMap::new(),
                 children: vec!["body".into()],
                 else_children: vec![],
                 inputs: HashMap::new(),
@@ -1414,10 +1432,15 @@ mod tests {
             kind: CirNodeKind::PrimitiveInvocation,
             node_id: "root".into(),
             capability: Some("flaky_search".into()),
-            output: Some("r".into()),
+            output: Some(OutputSpec {
+                name: "r".into(),
+                type_name: "String".into(),
+                fields: vec![],
+            }),
             children: vec![],
             else_children: vec![],
             inputs: HashMap::new(),
+            input_types: HashMap::new(),
             control: Some(ControlSpec {
                 condition: None,
                 loop_spec: None,
@@ -1696,6 +1719,7 @@ mod tests {
                 node_id: "root".into(),
                 capability: None,
                 output: None,
+                input_types: HashMap::new(),
                 children: vec!["search".into(), "write".into()],
                 else_children: vec![],
                 inputs: HashMap::new(),
@@ -1705,17 +1729,26 @@ mod tests {
                 kind: CirNodeKind::PrimitiveInvocation,
                 node_id: "search".into(),
                 capability: Some("flaky_search".into()),
-                output: Some("results".into()),
+                output: Some(OutputSpec {
+                    name: "results".into(),
+                    type_name: "String".into(),
+                    fields: vec![],
+                }),
                 children: vec![],
                 else_children: vec![],
                 inputs: HashMap::new(),
+                input_types: HashMap::new(),
                 control: None,
             },
             CirNode {
                 kind: CirNodeKind::PrimitiveInvocation,
                 node_id: "write".into(),
                 capability: Some("write_file".into()),
-                output: Some("ref".into()),
+                output: Some(OutputSpec {
+                    name: "ref".into(),
+                    type_name: "String".into(),
+                    fields: vec![],
+                }),
                 children: vec![],
                 else_children: vec![],
                 inputs: vec![
@@ -1729,6 +1762,7 @@ mod tests {
                 ]
                 .into_iter()
                 .collect(),
+                input_types: HashMap::new(),
                 control: None,
             },
         ];
