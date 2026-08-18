@@ -126,10 +126,15 @@
   - 结论：> **Probe-2 支持"Prompt/Context Contract 是 Probe-1 主要混淆变量"的判断；尚不足以单独证明 ModelCompiler 已具备通用 Cognitive Program Discovery 能力。**
   - 决策：走 **Formal P1-5B**（正式 Discovery Evaluation），不继续无限调 Prompt
 - [x] **Probe-2 结果分析** → 决定走 B or C → **走 A：Formal P1-5B**
-- [ ] **P1-5B Formal Branch** 🔬 IN PROGRESS
-  - 建议纳入：执行失败反馈进 repair 循环、schema 事实入 Compile Context、输出要求接地以改善 L3 验证
-  - 前置工程问题：Generated-code data contract（见 Known Limitation）
-- [x] **Stage Data Contract Phase 1 已完成**（编译期 R1–R5，见 `docs/specs/2026-08-18-stage-data-contract-design.md`）
+- [x] **Stage Data Contract Phase 1**（编译期 R1–R5，见 `docs/specs/2026-08-18-stage-data-contract-design.md`）✅ FROZEN
+  - 实施史料：`docs/specs/2026-08-18-stage-data-contract-phase1-plan.md`（12 commits，每任务独立审查）
+  - 范围：OutputSpec/FieldSpec/input_types 全链迁移、R1–R5 契约检查（`crates/acos-compiler/src/contract.rs`）、runtime 点路径 `${a.b.c}`、探针 trace contract 层
+  - 验证：`cargo test --workspace` 全绿 + `cargo clippy --workspace --all-targets -- -D warnings` clean
+  - **冻结声明**：P1-5B Formal 实验期间不再改动 Phase 1 代码（防止实验条件漂移）
+- [ ] **P1-5B Formal Evaluation** 🔬 NEXT
+  - 指标：`Discovery Success = Compile PASS ∧ Contract PASS ∧ Execute PASS ∧ Adequacy PASS`
+  - 分别报告：Compile / Contract / Execute / Adequacy 成功率、Overall Discovery Success Rate、Repair Rate、平均 Repair Count、Latency、Token Cost
+  - 对比基准：Task Behavioral Requirements + Ground Truth（**不再与 Golden CIR 比结构**）
 
 **P1-5B 过程中的运行时/编译器修复**（P1-5B-A 之外）：
 - [x] `acos-llm`：`max_tokens` 可配置（`ACOS_LLM_MAX_TOKENS`，默认 32768）— 修复 LongCat-2.0 thinking 吞掉输出预算导致空响应
@@ -247,7 +252,7 @@ ModelCompiler:      0/1 (编译器失败，LLM 返回空/无效输出)
 - [x] 实现 Discovery Probe 二进制（3 runs + 执行 + 验证）
 - [x] 运行 Discovery Probe（Probe-1/2/2b/2c/2d，结果归档 `probe-results/`、`probe-2*-results/`）
 - [x] 分析结果（`probe-2-analysis.md`：决策 = Formal P1-5B）
-- [ ] **Formal P1-5B**（正式 Discovery Evaluation；前置：Generated-code data contract 修复）
+- [ ] **Formal P1-5B**（正式 Discovery Evaluation；前置 Generated-code data contract 已修复——Stage Data Contract Phase 1 完成并冻结）
 
 ### 后续计划
 
