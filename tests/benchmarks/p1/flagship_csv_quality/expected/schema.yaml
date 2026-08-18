@@ -1,0 +1,70 @@
+# P1-FLAGSHIP-001 — Expected Output Schema
+#
+# This defines mandatory structure for the report and evidence artifacts.
+# Content may vary (different wording, different ACOS program structures)
+# but structure and presence requirements are strict.
+
+report:
+  # Required top-level sections (order independent).
+  required_sections:
+    - data_quality
+    - quarterly_summary
+    - anomalies
+    - recovery_log
+
+  # What each section must contain.
+  section_requirements:
+    data_quality:
+      description: "Per-file assessment of schema conformance, type errors, missing values, duplicates, outliers"
+      per_file: true
+      fields:
+        - file_name
+        - issues_detected
+        - repair_actions_taken
+        - validation_status
+
+    quarterly_summary:
+      description: "Aggregated statistics across all quarters"
+      fields:
+        - total_revenue
+        - total_units
+        - per_quarter_breakdown
+        - top_product
+
+    anomalies:
+      description: "Files that could NOT be fully repaired or that contain unresolved issues"
+      fields:
+        - file_name
+        - anomaly_type
+        - resolution
+        - remaining_concerns
+
+    recovery_log:
+      description: "Every retry, rule-replan, and model-replan event with outcome"
+      fields:
+        - event_type        # retry | rule_replan | model_replan
+        - trigger           # what failure triggered it
+        - action            # what was attempted
+        - outcome           # success | failed | partial
+        - cost_delta        # additional LLM calls or time
+
+# Evidence artifact requirements.
+evidence:
+  required: true
+
+  required_entry_types:
+    - file_processed       # each file the system touched
+    - decision_rationale   # why a repair/recovery choice was made
+    - verification_result  # outcome of post-repair validation
+
+  optional_entry_types:
+    - retry_attempt
+    - replan_invocation
+    - artifact_reference
+
+  # Every evidence entry must be timestamped and reference the producing node.
+  required_fields:
+    - timestamp
+    - node_id
+    - event_type
+    - summary

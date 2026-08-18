@@ -1,0 +1,39 @@
+# ACOS-native task spec for P1-FLAGSHIP-001.
+# Compatible with acos-cli `run` / `compile` subcommands.
+
+apiVersion: acos.io/v1
+id: "fd3f5a5e-1b0a-4b1e-8c7a-9e2d4f6a8b01"
+kind: CognitiveTask
+metadata:
+  id: flagship_csv_quality
+goal: >-
+  Analyze all quarterly sales CSV files in the dataset directory. For each
+  file: detect data-quality issues (schema drift, type errors, missing values,
+  duplicates, outliers); repair recoverable issues; revalidate repaired inputs;
+  compute quarterly statistics; merge results; run a quality review; and
+  generate a consolidated Markdown report with an evidence log.
+inputs:
+  - type: File
+    path: tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv
+    format: csv
+  - type: File
+    path: tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv
+    format: csv
+  - type: File
+    path: tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv
+    format: csv
+  - type: File
+    path: tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv
+    format: csv
+outputs:
+  - type: Report
+    format: markdown
+constraints:
+  timeout_seconds: 300
+  max_cost: 5.0
+  allowed_network: false
+optimization:
+  primary: reliability
+  secondary: cost
+approval:
+  externalSideEffects: required

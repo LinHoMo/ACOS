@@ -1,0 +1,8 @@
+date,product,category,units,revenue
+2024-10-05,Widget A,Electronics,95,4750.00
+2024-10-18,Widget B,Electronics,-5,-250.00
+2024-11-02,Gadget X,Home,180,900000.00
+2024-11-15,Gadget Y,Home,70,2800.00
+2024-12-01,Widget A,Electronics,105,5250.00
+2024-12-20,Service Z,Services,40,6000.00
+2024-12-28,Widget A,Electronics,88,1200000.00

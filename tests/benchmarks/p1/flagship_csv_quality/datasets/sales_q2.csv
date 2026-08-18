@@ -1,0 +1,7 @@
+transaction_date,item_name,item_category,quantity,sales
+2024-04-02,Widget A,Electronics,80,"$4,200.00"
+2024-04-18,Widget B,Electronics,60,$3,150.00
+2024-05-05,Gadget X,Home,150,6000.00
+2024-05-22,Gadget Y,Home,NA,2400.00
+2024-06-10,Widget A,Electronics,95,$4,750.00
+2024-06-25,Service Z,Services,25,3750.00

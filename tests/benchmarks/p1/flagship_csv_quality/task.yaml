@@ -1,0 +1,80 @@
+# P1-FLAGSHIP-001 — Heterogeneous CSV Quality Analysis & Recovery
+#
+# This is the canonical P1 benchmark task. It exercises the full ACOS
+# pipeline: Condition, Loop, Retry, Rule Recovery, Model Recovery,
+# Verification, and Evidence.
+#
+# The dataset directory contains 4 quarterly CSV files with deliberate
+# data-quality issues. ACOS must detect, repair, revalidate, analyze,
+# and report — while handling injected failures.
+#
+# See README.md for disturbance modes, success metrics, and baseline
+# comparison protocol.
+
+id: p1_flagship_csv_quality_001
+name: heterogeneous_csv_quality_analysis
+version: "0.1"
+mode: run
+
+goal: >
+  Analyze all quarterly sales CSV files in the dataset directory. For each
+  file: detect data-quality issues (schema drift, type errors, missing
+  values, duplicates, outliers); repair recoverable issues; revalidate
+  repaired inputs; compute quarterly statistics; merge results; run a
+  quality review; and generate a consolidated Markdown report with an
+  evidence log. The task intentionally injects transient failures,
+  rule-recoverable failures, and failures requiring re-planning — the
+  runtime must recover autonomously.
+
+inputs:
+  - id: dataset_dir
+    type: Directory
+    path: tests/benchmarks/p1/flagship_csv_quality/datasets
+    format: csv_directory
+
+outputs:
+  - id: report
+    type: Artifact
+    format: markdown
+  - id: evidence
+    type: Artifact
+    format: json
+
+constraints:
+  max_cost_usd: 5.0
+  max_runtime_seconds: 300
+  max_replan_count: 3
+  allowed_network: false
+
+# ── What behavior this task requires from ACOS ──────────────────────────────
+# These are NOT implementation constraints — they describe what the task
+# inherently demands. A valid ACOS execution should exhibit all of them.
+
+expected_behavior:
+  requires_iteration: true        # must loop over 4 files
+  requires_condition: true        # must branch on data-quality checks
+  requires_retry: true            # must handle transient failures
+  requires_recovery: true         # must recover from deterministic failures
+  requires_verification: true     # must validate repaired data
+  requires_evidence: true         # must log evidence of decisions
+
+# ── Success criteria (what "done" looks like) ───────────────────────────────
+# We specify OUTCOMES, not implementation. Any ACOS program that produces
+# a report meeting the schema and evidence requirements passes.
+
+expected:
+  compile: pass
+  execution: pass
+  verification: pass
+  final_status: success
+
+  minimum_artifacts:
+    - report.md
+    - evidence.json
+
+  recovery:
+    retry: true                   # at least one retry must occur
+    rule_replan: true             # at least one rule-based recovery
+    model_replan: optional        # model recovery if rule fails
+
+  report_schema: expected/schema.yaml
