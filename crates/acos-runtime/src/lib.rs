@@ -5,19 +5,23 @@
 
 #![warn(missing_docs)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 
-use async_trait::async_trait;
 use serde_json::Value;
 use tokio::sync::Mutex;
 
 use acos_core::error::AcosError;
-use acos_core::id::{ArtifactId, RunId};
+use acos_core::expr;
+use acos_core::id::RunId;
 use acos_core::traits::{
-    ArtifactStore, Event, EventStore, PluginRegistry, Primitive, RunHandle, RunStatus,
+    ArtifactStore, Event, EventStore, PluginRegistry, Primitive, RecoveryContext, RunStatus,
 };
-use acos_core::types::{CirNode, CirNodeKind, CirProgram, TypedValue, ValueType};
+use acos_core::types::{
+    CirNode, CirNodeKind, CirProgram, EffectKind, FailureContext, LoopKind, RecoveryProposal,
+    TypedValue, ValueType,
+};
 use acos_plugin::BuiltinRegistry;
 
 // ── Run report ──────────────────────────────────────────────────────────────
@@ -94,8 +98,26 @@ impl RuntimeImpl {
         }
     }
 
+    /// Maximum recovery (replan) attempts per run before failing.
+    pub const MAX_RECOVERY_ATTEMPTS: u32 = 3;
+
     /// Executes a program and returns a report.
     pub async fn execute(&self, program: CirProgram) -> Result<RunReport, AcosError> {
+        self.execute_with_recovery(program, None).await
+    }
+
+    /// Executes a program with optional failure recovery.
+    ///
+    /// On failure: the rule replanner is tried first, then the model
+    /// replanner. A proposal is only committed after [`Self::validate_proposal`]
+    /// passes; the failing node is replaced with the subgraph root (which keeps
+    /// the failing node's id) and the whole program is re-run from `entry`. The
+    /// env carries over across attempts so produced bindings survive.
+    pub async fn execute_with_recovery(
+        &self,
+        program: CirProgram,
+        recovery: Option<&RecoveryContext<'_>>,
+    ) -> Result<RunReport, AcosError> {
         let run_id = RunId::new();
         self.event_store
             .append(
@@ -106,47 +128,227 @@ impl RuntimeImpl {
             .await?;
 
         let env = Arc::new(Mutex::new(HashMap::<String, TypedValue>::new()));
+        let mut program = program;
+        let mut attempts = 0u32;
 
-        let node_map: HashMap<String, CirNode> = program
-            .nodes
-            .iter()
-            .map(|n| (n.node_id.clone(), n.clone()))
-            .collect();
+        loop {
+            let node_map: HashMap<String, CirNode> = program
+                .nodes
+                .iter()
+                .map(|n| (n.node_id.clone(), n.clone()))
+                .collect();
 
-        let result = self
-            .run_nodes(&node_map, &program.entry, run_id, env.clone())
-            .await;
-
-        let (produced_artifacts, evidence) = match result {
-            Ok((arts, ev)) => (arts, ev),
-            Err(e) => {
-                self.event_store
-                    .append(
+            match self
+                .run_nodes(&node_map, &program.entry, run_id, env.clone())
+                .await
+            {
+                Ok((produced, evidence)) => {
+                    self.event_store
+                        .append(
+                            run_id,
+                            "run.finished".into(),
+                            serde_json::json!({ "status": "Completed" }),
+                        )
+                        .await
+                        .ok();
+                    return Ok(RunReport {
                         run_id,
-                        "run.finished".into(),
-                        serde_json::json!({ "status": "Failed" }),
-                    )
-                    .await
-                    .ok();
-                return Err(e);
+                        status: RunStatus::Completed,
+                        artifacts: produced,
+                        evidence,
+                    });
+                }
+                Err((node_id, e)) => {
+                    let mut recovered = false;
+                    if attempts < Self::MAX_RECOVERY_ATTEMPTS {
+                        if let Some(ctx) = recovery {
+                            let class = e.classify();
+                            let recent_events: Vec<Event> = self
+                                .event_store
+                                .query(run_id)
+                                .await
+                                .unwrap_or_default()
+                                .into_iter()
+                                .rev()
+                                .take(5)
+                                .collect();
+                            let failure = FailureContext {
+                                run_id,
+                                node_id: node_id.clone(),
+                                error_class: class,
+                                error_message: e.to_string(),
+                                attempts,
+                                recent_events,
+                            };
+                            if let Some(rule) = ctx.rule {
+                                if let Some(proposal) = rule.propose(&failure, &program) {
+                                    recovered = self
+                                        .try_commit(&run_id, &mut program, &proposal, "rule")
+                                        .await;
+                                }
+                            }
+                            if !recovered {
+                                if let Some(model) = ctx.model {
+                                    if let Ok(Some(proposal)) =
+                                        model.propose(&failure, &program).await
+                                    {
+                                        recovered = self
+                                            .try_commit(&run_id, &mut program, &proposal, "model")
+                                            .await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !recovered {
+                        self.event_store
+                            .append(
+                                run_id,
+                                "run.finished".into(),
+                                serde_json::json!({ "status": "Failed" }),
+                            )
+                            .await
+                            .ok();
+                        return Err(e);
+                    }
+                    attempts += 1;
+                }
             }
-        };
+        }
+    }
 
+    /// Validates a recovery proposal and, if valid, commits it into `program`
+    /// (transactional patch). Emits `replan.started` / `replan.completed` /
+    /// `replan.rejected`.
+    async fn try_commit(
+        &self,
+        run_id: &RunId,
+        program: &mut CirProgram,
+        proposal: &RecoveryProposal,
+        planner: &str,
+    ) -> bool {
         self.event_store
             .append(
-                run_id,
-                "run.finished".into(),
-                serde_json::json!({ "status": "Completed" }),
+                *run_id,
+                "replan.started".into(),
+                serde_json::json!({
+                    "planner": planner,
+                    "node_id": proposal.replace_node,
+                    "reason": proposal.reason,
+                }),
             )
             .await
             .ok();
+        match self.validate_proposal(program, proposal).await {
+            Ok(()) => {
+                program.nodes.retain(|n| n.node_id != proposal.replace_node);
+                program.nodes.extend(proposal.subgraph.clone());
+                self.event_store
+                    .append(
+                        *run_id,
+                        "replan.completed".into(),
+                        serde_json::json!({
+                            "planner": planner,
+                            "node_id": proposal.replace_node,
+                            "subgraph_nodes": proposal
+                                .subgraph
+                                .iter()
+                                .map(|n| &n.node_id)
+                                .collect::<Vec<_>>(),
+                        }),
+                    )
+                    .await
+                    .ok();
+                true
+            }
+            Err(ve) => {
+                self.event_store
+                    .append(
+                        *run_id,
+                        "replan.rejected".into(),
+                        serde_json::json!({
+                            "planner": planner,
+                            "node_id": proposal.replace_node,
+                            "error": ve.to_string(),
+                        }),
+                    )
+                    .await
+                    .ok();
+                false
+            }
+        }
+    }
 
-        Ok(RunReport {
-            run_id,
-            status: RunStatus::Completed,
-            artifacts: produced_artifacts,
-            evidence,
-        })
+    /// Transactional commit gate for a recovery proposal.
+    ///
+    /// 1. Subgraph root must reuse `replace_node`'s id.
+    /// 2. Node ids unique within program ∪ subgraph.
+    /// 3. Every child reference resolves within subgraph ∪ program.
+    /// 4. Every capability resolves via the registry.
+    /// 5. Every effect kind declared by the subgraph primitives is already
+    ///    declared in `program.effects`.
+    pub async fn validate_proposal(
+        &self,
+        program: &CirProgram,
+        proposal: &RecoveryProposal,
+    ) -> Result<(), AcosError> {
+        let root = proposal.subgraph.first().ok_or_else(|| AcosError::ValidationFailure {
+            message: "recovery proposal has empty subgraph".into(),
+        })?;
+        if root.node_id != proposal.replace_node {
+            return Err(AcosError::ValidationFailure {
+                message: format!(
+                    "recovery subgraph root '{}' must reuse replace_node id '{}'",
+                    root.node_id, proposal.replace_node
+                ),
+            });
+        }
+        let mut known: HashSet<&str> =
+            program.nodes.iter().map(|n| n.node_id.as_str()).collect();
+        for node in &proposal.subgraph {
+            if node.node_id != proposal.replace_node && !known.insert(node.node_id.as_str()) {
+                return Err(AcosError::ValidationFailure {
+                    message: format!(
+                        "recovery subgraph introduces duplicate node id '{}'",
+                        node.node_id
+                    ),
+                });
+            }
+        }
+        for node in &proposal.subgraph {
+            for child in &node.children {
+                let in_subgraph = proposal.subgraph.iter().any(|s| &s.node_id == child);
+                if !in_subgraph && !known.contains(child.as_str()) {
+                    return Err(AcosError::ValidationFailure {
+                        message: format!("recovery subgraph references unknown child '{child}'"),
+                    });
+                }
+            }
+        }
+        for node in &proposal.subgraph {
+            if let Some(capability) = &node.capability {
+                let primitive = self
+                    .registry
+                    .resolve(capability)
+                    .await
+                    .map_err(|_| AcosError::ValidationFailure {
+                        message: format!(
+                            "recovery subgraph capability '{capability}' is unavailable"
+                        ),
+                    })?;
+                for effect in primitive.effects() {
+                    if !program.effects.iter().any(|d| d.kind == effect.kind) {
+                        return Err(AcosError::ValidationFailure {
+                            message: format!(
+                                "recovery subgraph effect {:?} not declared in program.effects",
+                                effect.kind
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Iteratively executes nodes and returns produced artifacts + evidence.
@@ -156,14 +358,17 @@ impl RuntimeImpl {
         entries: &[String],
         run_id: RunId,
         env: Arc<Mutex<HashMap<String, TypedValue>>>,
-    ) -> Result<(Vec<String>, Vec<Evidence>), AcosError> {
+    ) -> Result<(Vec<String>, Vec<Evidence>), (String, AcosError)> {
         let mut artifacts = Vec::new();
         let mut evidence = Vec::new();
         for entry in entries {
             let node = node_map.get(entry).ok_or_else(|| {
-                AcosError::RuntimeInfrastructureFailure {
-                    message: format!("node {entry} not found"),
-                }
+                (
+                    entry.clone(),
+                    AcosError::RuntimeInfrastructureFailure {
+                        message: format!("node {entry} not found"),
+                    },
+                )
             })?;
             self.run_node(node, run_id, &env, &mut artifacts, &mut evidence, node_map)
                 .await?;
@@ -171,7 +376,7 @@ impl RuntimeImpl {
         Ok((artifacts, evidence))
     }
 
-    /// Executes a single node.
+    /// Executes a single node (with its `control.retry` policy applied).
     #[allow(clippy::too_many_arguments)]
     async fn run_node(
         &self,
@@ -181,21 +386,130 @@ impl RuntimeImpl {
         artifacts: &mut Vec<String>,
         evidence: &mut Vec<Evidence>,
         node_map: &HashMap<String, CirNode>,
-    ) -> Result<(), AcosError> {
+    ) -> Result<(), (String, AcosError)> {
+        // Resolve the primitive once so retries reuse the same instance
+        // (preserving internal failure-count state across attempts).
+        let resolved: Option<Arc<dyn Primitive>> =
+            if node.kind == CirNodeKind::PrimitiveInvocation {
+                let cap = node.capability.clone().ok_or_else(|| {
+                    (
+                        node.node_id.clone(),
+                        AcosError::RuntimeInfrastructureFailure {
+                            message: format!("primitive node {} has no capability", node.node_id),
+                        },
+                    )
+                })?;
+                Some(Arc::from(
+                    self.registry
+                        .resolve(&cap)
+                        .await
+                        .map_err(|e| (node.node_id.clone(), e))?,
+                ))
+            } else {
+                None
+            };
+
+        let retry = node.control.as_ref().and_then(|c| c.retry.clone());
+        if let Some(policy) = retry {
+            let mut attempt = 0u32;
+            loop {
+                attempt += 1;
+                match self
+                    .run_node_inner(node, run_id, env, artifacts, evidence, node_map, &resolved)
+                    .await
+                {
+                    Ok(()) => return Ok(()),
+                    Err((failing_id, e)) => {
+                        let class = e.classify();
+                        let retryable =
+                            policy.retry_on.is_empty() || policy.retry_on.contains(&class);
+                        let safe = self.retry_safe(node, resolved.as_ref()).await;
+                        if attempt >= policy.max_attempts || !retryable || !safe {
+                            if attempt > 1 {
+                                self.event_store
+                                    .append(
+                                        run_id,
+                                        "retry.exhausted".into(),
+                                        serde_json::json!({
+                                            "node_id": &node.node_id,
+                                            "attempts": attempt,
+                                        }),
+                                    )
+                                    .await
+                                    .ok();
+                            }
+                            return Err((failing_id, e));
+                        }
+                        self.event_store
+                            .append(
+                                run_id,
+                                "retry.started".into(),
+                                serde_json::json!({
+                                    "node_id": &node.node_id,
+                                    "attempt": attempt,
+                                    "class": format!("{class:?}"),
+                                }),
+                            )
+                            .await
+                            .ok();
+                        tokio::time::sleep(Duration::from_millis(policy.backoff_ms)).await;
+                    }
+                }
+            }
+        }
+        self.run_node_inner(node, run_id, env, artifacts, evidence, node_map, &resolved)
+            .await
+    }
+
+    /// Retry-safety gate: only pure-read effects or explicitly idempotent
+    /// primitives may be auto-retried (conservative MVP rule).
+    async fn retry_safe(&self, node: &CirNode, resolved: Option<&Arc<dyn Primitive>>) -> bool {
+        if node.kind != CirNodeKind::PrimitiveInvocation {
+            return true;
+        }
+        let Some(prim) = resolved else {
+            return false;
+        };
+        prim.idempotent()
+            || prim
+                .effects()
+                .iter()
+                .all(|e| matches!(e.kind, EffectKind::FsRead | EffectKind::NetworkRead))
+    }
+
+    /// Executes a single node by kind (no retry policy applied).
+    #[allow(clippy::too_many_arguments)]
+    async fn run_node_inner(
+        &self,
+        node: &CirNode,
+        run_id: RunId,
+        env: &Arc<Mutex<HashMap<String, TypedValue>>>,
+        artifacts: &mut Vec<String>,
+        evidence: &mut Vec<Evidence>,
+        node_map: &HashMap<String, CirNode>,
+        resolved: &Option<Arc<dyn Primitive>>,
+    ) -> Result<(), (String, AcosError)> {
         match node.kind {
             CirNodeKind::Sequence | CirNodeKind::Parallel => {
                 self.event_store
                     .append(
                         run_id,
                         "node.start".into(),
-                        serde_json::json!({ "node_id": &node.node_id, "kind": format!("{:?}", node.kind) }),
+                        serde_json::json!({
+                            "node_id": &node.node_id,
+                            "kind": format!("{:?}", node.kind),
+                        }),
                     )
-                    .await?;
+                    .await
+                    .map_err(|e| (node.node_id.clone(), e))?;
                 for child_id in &node.children {
                     let child = node_map.get(child_id).ok_or_else(|| {
-                        AcosError::RuntimeInfrastructureFailure {
-                            message: format!("child node {child_id} not found"),
-                        }
+                        (
+                            node.node_id.clone(),
+                            AcosError::RuntimeInfrastructureFailure {
+                                message: format!("child node {child_id} not found"),
+                            },
+                        )
                     })?;
                     Box::pin(self.run_node(child, run_id, env, artifacts, evidence, node_map))
                         .await?;
@@ -203,14 +517,38 @@ impl RuntimeImpl {
                 Ok(())
             }
             CirNodeKind::PrimitiveInvocation => {
-                self.run_primitive(node, run_id, env, artifacts, evidence).await
+                let prim = match resolved {
+                    Some(p) => p.clone(),
+                    None => Arc::from(
+                        self.registry
+                            .resolve(node.capability.as_deref().unwrap_or(""))
+                            .await
+                            .map_err(|e| (node.node_id.clone(), e))?,
+                    ),
+                };
+                self.run_primitive(node, run_id, env, artifacts, evidence, &*prim)
+                    .await
+                    .map_err(|e| (node.node_id.clone(), e))
+            }
+            CirNodeKind::Conditional => {
+                self.run_conditional(node, run_id, env, artifacts, evidence, node_map)
+                    .await
+            }
+            CirNodeKind::LoopMap => {
+                self.run_loop(node, run_id, env, artifacts, evidence, node_map)
+                    .await
             }
             _ => {
+                // Checkpoint / Verification / ArtifactRef / Retry (deprecated):
+                // passthrough children, unchanged.
                 for child_id in &node.children {
                     let child = node_map.get(child_id).ok_or_else(|| {
-                        AcosError::RuntimeInfrastructureFailure {
-                            message: format!("child node {child_id} not found"),
-                        }
+                        (
+                            node.node_id.clone(),
+                            AcosError::RuntimeInfrastructureFailure {
+                                message: format!("child node {child_id} not found"),
+                            },
+                        )
                     })?;
                     Box::pin(self.run_node(child, run_id, env, artifacts, evidence, node_map))
                         .await?;
@@ -218,6 +556,267 @@ impl RuntimeImpl {
                 Ok(())
             }
         }
+    }
+
+    /// Executes a conditional node: evaluate `control.condition`, then run the
+    /// `then` branch (`children`) or the `else` branch (`else_children`).
+    #[allow(clippy::too_many_arguments)]
+    async fn run_conditional(
+        &self,
+        node: &CirNode,
+        run_id: RunId,
+        env: &Arc<Mutex<HashMap<String, TypedValue>>>,
+        artifacts: &mut Vec<String>,
+        evidence: &mut Vec<Evidence>,
+        node_map: &HashMap<String, CirNode>,
+    ) -> Result<(), (String, AcosError)> {
+        let cond = node
+            .control
+            .as_ref()
+            .and_then(|c| c.condition.as_ref())
+            .ok_or_else(|| {
+                (
+                    node.node_id.clone(),
+                    AcosError::ValidationFailure {
+                        message: format!(
+                            "conditional node '{}' has no control.condition",
+                            node.node_id
+                        ),
+                    },
+                )
+            })?;
+        let expr = expr::parse(&cond.expression).map_err(|e| {
+            (
+                node.node_id.clone(),
+                AcosError::ValidationFailure {
+                    message: format!("conditional node '{}': {e}", node.node_id),
+                },
+            )
+        })?;
+        let guard = env.lock().await;
+        let result = expr::evaluate(&expr, &guard)
+            .map_err(|e| (node.node_id.clone(), e))?;
+        drop(guard);
+
+        let branch = if result { &node.children } else { &node.else_children };
+        self.event_store
+            .append(
+                run_id,
+                "node.start".into(),
+                serde_json::json!({
+                    "node_id": &node.node_id,
+                    "kind": "conditional",
+                    "branch": if result { "then" } else { "else" },
+                }),
+            )
+            .await
+            .map_err(|e| (node.node_id.clone(), e))?;
+
+        for child_id in branch {
+            let child = node_map.get(child_id).ok_or_else(|| {
+                (
+                    node.node_id.clone(),
+                    AcosError::RuntimeInfrastructureFailure {
+                        message: format!("child node {child_id} not found"),
+                    },
+                )
+            })?;
+            Box::pin(self.run_node(child, run_id, env, artifacts, evidence, node_map)).await?;
+        }
+        Ok(())
+    }
+
+    /// Executes a loop node (while/until/for_each) per the CIR spec.
+    #[allow(clippy::too_many_arguments)]
+    async fn run_loop(
+        &self,
+        node: &CirNode,
+        run_id: RunId,
+        env: &Arc<Mutex<HashMap<String, TypedValue>>>,
+        artifacts: &mut Vec<String>,
+        evidence: &mut Vec<Evidence>,
+        node_map: &HashMap<String, CirNode>,
+    ) -> Result<(), (String, AcosError)> {
+        let spec = node
+            .control
+            .as_ref()
+            .and_then(|c| c.loop_spec.as_ref())
+            .ok_or_else(|| {
+                (
+                    node.node_id.clone(),
+                    AcosError::ValidationFailure {
+                        message: format!("loop node '{}' has no control.loop_spec", node.node_id),
+                    },
+                )
+            })?;
+
+        let mut iteration: u32 = 0;
+        match spec.kind {
+            LoopKind::While | LoopKind::Until => {
+                let cond = spec.condition.clone().ok_or_else(|| {
+                    (
+                        node.node_id.clone(),
+                        AcosError::ValidationFailure {
+                            message: format!(
+                                "loop node '{}' {:?} requires a condition",
+                                node.node_id, spec.kind
+                            ),
+                        },
+                    )
+                })?;
+                loop {
+                    if let Some(max) = spec.max_iterations {
+                        if iteration >= max {
+                            return Err((
+                                node.node_id.clone(),
+                                AcosError::RuntimeInfrastructureFailure {
+                                    message: format!(
+                                        "loop node '{}' reached max_iterations ({max}) without \
+                                         satisfying exit condition",
+                                        node.node_id
+                                    ),
+                                },
+                            ));
+                        }
+                    }
+                    iteration += 1;
+                    let expr = expr::parse(&cond).map_err(|e| {
+                        (
+                            node.node_id.clone(),
+                            AcosError::ValidationFailure {
+                                message: format!("loop node '{}': {e}", node.node_id),
+                            },
+                        )
+                    })?;
+                    let guard = env.lock().await;
+                    let result = expr::evaluate(&expr, &guard)
+                        .map_err(|e| (node.node_id.clone(), e))?;
+                    drop(guard);
+
+                    if spec.kind == LoopKind::Until && result {
+                        break;
+                    }
+                    if spec.kind == LoopKind::While && !result {
+                        break;
+                    }
+
+                    self.emit_iteration(run_id, &node.node_id, iteration).await?;
+                    for child_id in &node.children {
+                        let child = node_map.get(child_id).ok_or_else(|| {
+                            (
+                                node.node_id.clone(),
+                                AcosError::RuntimeInfrastructureFailure {
+                                    message: format!("child node {child_id} not found"),
+                                },
+                            )
+                        })?;
+                        Box::pin(self.run_node(child, run_id, env, artifacts, evidence, node_map))
+                            .await?;
+                    }
+                    self.complete_iteration(run_id, &node.node_id, iteration).await?;
+                }
+                Ok(())
+            }
+            LoopKind::ForEach => {
+                let input = spec.input.clone().ok_or_else(|| {
+                    (
+                        node.node_id.clone(),
+                        AcosError::ValidationFailure {
+                            message: format!(
+                                "loop node '{}' for_each requires input",
+                                node.node_id
+                            ),
+                        },
+                    )
+                })?;
+                let item_var = spec.item_var.clone().ok_or_else(|| {
+                    (
+                        node.node_id.clone(),
+                        AcosError::ValidationFailure {
+                            message: format!(
+                                "loop node '{}' for_each requires itemVar",
+                                node.node_id
+                            ),
+                        },
+                    )
+                })?;
+                let items = self
+                    .resolve_ref_value(&input, env)
+                    .await
+                    .map(|tv| tv.payload.as_array().cloned().unwrap_or_default())
+                    .unwrap_or_default();
+                let max = spec.max_iterations.map(|m| m as usize);
+                for (i, item) in items.iter().enumerate() {
+                    if let Some(max) = max {
+                        if i >= max {
+                            break;
+                        }
+                    }
+                    {
+                        let mut guard = env.lock().await;
+                        guard.insert(
+                            item_var.clone(),
+                            TypedValue {
+                                value_type: ValueType::Scalar,
+                                payload: item.clone(),
+                            },
+                        );
+                    }
+                    self.emit_iteration(run_id, &node.node_id, (i + 1) as u32).await?;
+                    for child_id in &node.children {
+                        let child = node_map.get(child_id).ok_or_else(|| {
+                            (
+                                node.node_id.clone(),
+                                AcosError::RuntimeInfrastructureFailure {
+                                    message: format!("child node {child_id} not found"),
+                                },
+                            )
+                        })?;
+                        Box::pin(self.run_node(child, run_id, env, artifacts, evidence, node_map))
+                            .await?;
+                    }
+                    self.complete_iteration(run_id, &node.node_id, (i + 1) as u32)
+                        .await?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Emits an `iteration.started` event.
+    async fn emit_iteration(
+        &self,
+        run_id: RunId,
+        node_id: &str,
+        index: u32,
+    ) -> Result<(), (String, AcosError)> {
+        self.event_store
+            .append(
+                run_id,
+                "iteration.started".into(),
+                serde_json::json!({ "node_id": node_id, "index": index }),
+            )
+            .await
+            .map_err(|e| (node_id.to_string(), e))?;
+        Ok(())
+    }
+
+    /// Emits an `iteration.completed` event.
+    async fn complete_iteration(
+        &self,
+        run_id: RunId,
+        node_id: &str,
+        index: u32,
+    ) -> Result<(), (String, AcosError)> {
+        self.event_store
+            .append(
+                run_id,
+                "iteration.completed".into(),
+                serde_json::json!({ "node_id": node_id, "index": index }),
+            )
+            .await
+            .map_err(|e| (node_id.to_string(), e))?;
+        Ok(())
     }
 
     /// Runs a primitive invocation node.
@@ -228,17 +827,11 @@ impl RuntimeImpl {
         env: &Arc<Mutex<HashMap<String, TypedValue>>>,
         artifacts: &mut Vec<String>,
         evidence: &mut Vec<Evidence>,
+        primitive: &dyn Primitive,
     ) -> Result<(), AcosError> {
         let capability = node.capability.as_ref().ok_or_else(|| {
             AcosError::RuntimeInfrastructureFailure {
                 message: format!("primitive node {} has no capability", node.node_id),
-            }
-        })?;
-
-        let primitive = self.registry.resolve(capability).await.map_err(|e| {
-            AcosError::ProviderFailure {
-                provider: capability.clone(),
-                message: format!("failed to resolve: {e}"),
             }
         })?;
 
@@ -304,6 +897,23 @@ impl RuntimeImpl {
         Ok(())
     }
 
+    /// Resolves a `${name}` / `$name` reference into its `TypedValue` from the
+    /// environment (exact lookup; no fuzzy matching).
+    async fn resolve_ref_value(
+        &self,
+        ref_str: &str,
+        env: &Arc<Mutex<HashMap<String, TypedValue>>>,
+    ) -> Option<TypedValue> {
+        let name = if ref_str.starts_with("${") && ref_str.ends_with('}') {
+            &ref_str[2..ref_str.len() - 1]
+        } else if ref_str.starts_with('$') {
+            &ref_str[1..]
+        } else {
+            return None;
+        };
+        env.lock().await.get(name).cloned()
+    }
+
     /// Resolves a node's input bindings into a single TypedValue.
     async fn resolve_inputs(
         &self,
@@ -346,51 +956,6 @@ impl RuntimeImpl {
     }
 }
 
-/// Recursively replaces `$name` / `${name}` tokens in a JSON value.
-fn resolve_refs_in_value(value: &mut Value, env: &HashMap<String, TypedValue>) {
-    match value {
-        Value::String(s) => {
-            if let Some(name) = s
-                .strip_prefix("${")
-                .and_then(|x| x.strip_suffix("}"))
-                .or_else(|| s.strip_prefix("$"))
-            {
-                let matched = env
-                    .get(name)
-                    .cloned()
-                    .or_else(|| {
-                        env.iter()
-                            .find(|(k, _)| k.eq_ignore_ascii_case(name))
-                            .map(|(_, v)| v.clone())
-                    })
-                    .or_else(|| {
-                        env.iter()
-                            .find(|(k, _)| {
-                                let a = k.to_lowercase();
-                                let b = name.to_lowercase();
-                                a.contains(&b) || b.contains(&a)
-                            })
-                            .map(|(_, v)| v.clone())
-                    });
-                if let Some(tv) = matched {
-                    *value = tv.payload.clone();
-                }
-            }
-        }
-        Value::Array(arr) => {
-            for item in arr {
-                resolve_refs_in_value(item, env);
-            }
-        }
-        Value::Object(map) => {
-            for v in map.values_mut() {
-                resolve_refs_in_value(v, env);
-            }
-        }
-        _ => {}
-    }
-}
-
 /// Resolves a `$name` or `${name}` reference to its string form.
 async fn resolve_ref(ref_str: &str, env: &Arc<Mutex<HashMap<String, TypedValue>>>) -> String {
     let name = if ref_str.starts_with("${") && ref_str.ends_with("}") {
@@ -414,12 +979,25 @@ async fn resolve_ref(ref_str: &str, env: &Arc<Mutex<HashMap<String, TypedValue>>
 /// Re-export as `Runtime` for convenience.
 pub use RuntimeImpl as Runtime;
 
+pub mod replan;
+
+pub use replan::{OfflineFallbackRule, RecoveryRule, RuleReplanner};
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use acos_compiler::RuleCompiler;
-    use acos_core::traits::Compiler;
-    use acos_core::types::{TaskInput, TaskSpec};
+    use async_trait::async_trait;
+    use acos_core::id::PrimitiveId;
+    use acos_core::traits::{
+        CapabilityDesc, Compiler, PluginRegistry, Primitive, PrimitiveManifest, RecoveryContext,
+        Replanner,
+    };
+    use acos_core::types::{
+        CirNode, CirNodeKind, ConditionSpec, ControlSpec, EffectDecl, EffectKind, FailureClass,
+        FailureContext, LoopKind, LoopSpec, RecoveryProposal, RetryPolicy, RetryStrategy,
+        TaskInput, TaskSpec,
+    };
     use acos_state::InMemoryStore;
 
     fn csv_task() -> TaskSpec {
@@ -468,5 +1046,474 @@ mod tests {
         assert!(report.artifacts().contains(&"report.md".to_string()), "artifact persisted");
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── Control-semantics tests ───────────────────────────────────────────────
+
+    fn primitive_node(id: &str, capability: &str, output: Option<&str>) -> CirNode {
+        CirNode {
+            kind: CirNodeKind::PrimitiveInvocation,
+            node_id: id.into(),
+            capability: Some(capability.into()),
+            output: output.map(String::from),
+            children: vec![],
+            else_children: vec![],
+            inputs: HashMap::new(),
+            control: None,
+        }
+    }
+
+    fn program_from(nodes: Vec<CirNode>) -> CirProgram {
+        CirProgram {
+            id: acos_core::id::ProgramId::new(),
+            task_id: acos_core::id::TaskId(uuid::Uuid::new_v4()),
+            entry: vec!["root".into()],
+            nodes,
+            effects: vec![],
+        }
+    }
+
+    async fn events_for(program: &CirProgram) -> Vec<String> {
+        let store: Arc<dyn EventStore + Send + Sync> = Arc::new(InMemoryStore::new());
+        let astore: Arc<dyn ArtifactStore + Send + Sync> = Arc::new(InMemoryStore::new());
+        let runtime = RuntimeImpl::new(store.clone(), astore);
+        let report = runtime.execute(program.clone()).await.unwrap();
+        store
+            .query(report.run_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| e.event_type)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn conditional_selects_then_branch() {
+        let nodes = vec![
+            CirNode {
+                kind: CirNodeKind::Sequence,
+                node_id: "root".into(),
+                capability: None,
+                output: None,
+                children: vec!["search".into(), "check".into(), "then_summarize".into()],
+                else_children: vec![],
+                inputs: HashMap::new(),
+                control: None,
+            },
+            primitive_node("search", "search", Some("results")),
+            CirNode {
+                kind: CirNodeKind::Conditional,
+                node_id: "check".into(),
+                capability: None,
+                output: None,
+                children: vec!["then_summarize".into()],
+                else_children: vec!["else_write".into()],
+                inputs: HashMap::new(),
+                control: Some(ControlSpec {
+                    condition: Some(ConditionSpec {
+                        expression: "exists(results)".into(),
+                    }),
+                    loop_spec: None,
+                    retry: None,
+                }),
+            },
+            primitive_node("then_summarize", "summarize", Some("summary")),
+            primitive_node("else_write", "write_file", Some("ref")),
+        ];
+        let events = events_for(&program_from(nodes)).await;
+        let then = events.iter().filter(|t| *t == "primitive.end").count();
+        assert!(then >= 2, "then branch should run summarize (+search)");
+    }
+
+    #[tokio::test]
+    async fn conditional_selects_else_branch_on_false_condition() {
+        let nodes = vec![
+            CirNode {
+                kind: CirNodeKind::Sequence,
+                node_id: "root".into(),
+                capability: None,
+                output: None,
+                children: vec!["check".into()],
+                else_children: vec![],
+                inputs: HashMap::new(),
+                control: None,
+            },
+            CirNode {
+                kind: CirNodeKind::Conditional,
+                node_id: "check".into(),
+                capability: None,
+                output: None,
+                children: vec!["then_summarize".into()],
+                else_children: vec!["else_write".into()],
+                inputs: HashMap::new(),
+                control: Some(ControlSpec {
+                    condition: Some(ConditionSpec {
+                        expression: "1 == 2".into(),
+                    }),
+                    loop_spec: None,
+                    retry: None,
+                }),
+            },
+            primitive_node("then_summarize", "summarize", Some("summary")),
+            primitive_node("else_write", "write_file", Some("ref")),
+        ];
+        let dir = std::env::temp_dir().join(format!("acos-else-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut nodes = nodes;
+        let write = nodes.iter_mut().find(|n| n.node_id == "else_write").unwrap();
+        write.inputs.insert(
+            "path".into(),
+            serde_json::Value::String(dir.join("out.txt").to_string_lossy().to_string()),
+        );
+        write.inputs.insert("content".into(), serde_json::Value::String("fallback".into()));
+        let program = program_from(nodes);
+        let store: Arc<dyn EventStore + Send + Sync> = Arc::new(InMemoryStore::new());
+        let astore: Arc<dyn ArtifactStore + Send + Sync> = Arc::new(InMemoryStore::new());
+        let runtime = RuntimeImpl::new(store.clone(), astore);
+        let report = runtime.execute(program).await.unwrap();
+        assert_eq!(report.status, RunStatus::Completed);
+        assert!(
+            report.artifacts.contains(&dir.join("out.txt").to_string_lossy().to_string()),
+            "else branch write_file must produce the artifact"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn for_each_loop_over_empty_list_is_ok() {
+        let nodes = vec![
+            CirNode {
+                kind: CirNodeKind::Sequence,
+                node_id: "root".into(),
+                capability: None,
+                output: None,
+                children: vec!["search".into(), "loop".into()],
+                else_children: vec![],
+                inputs: HashMap::new(),
+                control: None,
+            },
+            primitive_node("search", "search", Some("items")),
+            CirNode {
+                kind: CirNodeKind::LoopMap,
+                node_id: "loop".into(),
+                capability: None,
+                output: None,
+                children: vec!["body".into()],
+                else_children: vec![],
+                inputs: HashMap::new(),
+                control: Some(ControlSpec {
+                    condition: None,
+                    loop_spec: Some(LoopSpec {
+                        kind: LoopKind::ForEach,
+                        condition: None,
+                        max_iterations: None,
+                        input: Some("${items}".into()),
+                        item_var: Some("item".into()),
+                    }),
+                    retry: None,
+                }),
+            },
+            primitive_node("body", "summarize", Some("summary")),
+        ];
+        let events = events_for(&program_from(nodes)).await;
+        assert_eq!(events.iter().filter(|t| *t == "iteration.started").count(), 0);
+    }
+
+    #[tokio::test]
+    async fn while_loop_hits_limit_and_fails() {
+        let nodes = vec![
+            CirNode {
+                kind: CirNodeKind::LoopMap,
+                node_id: "root".into(),
+                capability: None,
+                output: None,
+                children: vec!["body".into()],
+                else_children: vec![],
+                inputs: HashMap::new(),
+                control: Some(ControlSpec {
+                    condition: None,
+                    loop_spec: Some(LoopSpec {
+                        kind: LoopKind::While,
+                        condition: Some("1 == 1".into()),
+                        max_iterations: Some(2),
+                        input: None,
+                        item_var: None,
+                    }),
+                    retry: None,
+                }),
+            },
+            primitive_node("body", "search", Some("r")),
+        ];
+        let store: Arc<dyn EventStore + Send + Sync> = Arc::new(InMemoryStore::new());
+        let astore: Arc<dyn ArtifactStore + Send + Sync> = Arc::new(InMemoryStore::new());
+        let runtime = RuntimeImpl::new(store.clone(), astore);
+        let err = runtime.execute(program_from(nodes)).await.unwrap_err();
+        assert!(err.to_string().contains("max_iterations"));
+    }
+
+    #[tokio::test]
+    async fn retry_recovers_transient_failure_then_succeeds() {
+        let nodes = vec![CirNode {
+            kind: CirNodeKind::PrimitiveInvocation,
+            node_id: "root".into(),
+            capability: Some("flaky_search".into()),
+            output: Some("r".into()),
+            children: vec![],
+            else_children: vec![],
+            inputs: HashMap::new(),
+            control: Some(ControlSpec {
+                condition: None,
+                loop_spec: None,
+                retry: Some(RetryPolicy {
+                    max_attempts: 3,
+                    backoff_ms: 1,
+                    strategy: RetryStrategy::Fixed,
+                    retry_on: vec![FailureClass::Timeout],
+                }),
+            }),
+        }];
+        let store: Arc<dyn EventStore + Send + Sync> = Arc::new(InMemoryStore::new());
+        let astore: Arc<dyn ArtifactStore + Send + Sync> = Arc::new(InMemoryStore::new());
+        let runtime = RuntimeImpl::with_registry(store.clone(), astore, FlakyRegistry::new());
+        let report = runtime.execute(program_from(nodes)).await.unwrap();
+        assert_eq!(report.status, RunStatus::Completed);
+        let events = store.query(report.run_id).await.unwrap();
+        assert!(events.iter().any(|e| e.event_type == "retry.started"));
+    }
+
+    // ── Flaky test primitive + registry (inline; bench gets a shared one) ─────
+
+    #[derive(Debug)]
+    struct FlakySearchPrimitive {
+        remaining: std::sync::atomic::AtomicUsize,
+    }
+
+    impl FlakySearchPrimitive {
+        fn new(failures: usize) -> Self {
+            Self {
+                remaining: std::sync::atomic::AtomicUsize::new(failures),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Primitive for FlakySearchPrimitive {
+        fn capability(&self) -> CapabilityDesc {
+            CapabilityDesc {
+                id: "flaky_search".into(),
+                name: "Flaky Search".into(),
+                input_type: "SearchQuery".into(),
+                output_type: "DocumentList".into(),
+            }
+        }
+
+        fn effects(&self) -> Vec<EffectDecl> {
+            vec![EffectDecl {
+                kind: EffectKind::NetworkRead,
+                description: "network read".into(),
+                reversible: true,
+            }]
+        }
+
+        async fn invoke(&self, _input: TypedValue) -> Result<TypedValue, AcosError> {
+            if self
+                .remaining
+                .load(std::sync::atomic::Ordering::SeqCst)
+                > 0
+            {
+                self.remaining
+                    .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                return Err(AcosError::PrimitiveFailure {
+                    message: "simulated timeout".into(),
+                    primitive_id: Some("flaky_search".into()),
+                    class: FailureClass::Timeout,
+                });
+            }
+            Ok(TypedValue {
+                value_type: ValueType::List,
+                payload: serde_json::json!([]),
+            })
+        }
+
+        fn has_compensation(&self, _effect: &EffectDecl) -> bool {
+            false
+        }
+
+        async fn compensate(
+            &self,
+            _effect: &EffectDecl,
+            _input: TypedValue,
+        ) -> Result<(), AcosError> {
+            Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    struct FlakyRegistry {
+        inner: acos_plugin::BuiltinRegistry,
+    }
+
+    impl FlakyRegistry {
+        fn new() -> Self {
+            Self {
+                inner: acos_plugin::BuiltinRegistry::new(),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl PluginRegistry for FlakyRegistry {
+        fn list(&self) -> Vec<CapabilityDesc> {
+            self.inner.list()
+        }
+
+        async fn resolve(&self, capability_id: &str) -> Result<Box<dyn Primitive>, AcosError> {
+            if capability_id == "flaky_search" {
+                Ok(Box::new(FlakySearchPrimitive::new(1)))
+            } else {
+                self.inner.resolve(capability_id).await
+            }
+        }
+
+        async fn load(&self, m: PrimitiveManifest) -> Result<PrimitiveId, AcosError> {
+            self.inner.load(m).await
+        }
+
+        async fn unload(&self, id: PrimitiveId) -> Result<(), AcosError> {
+            self.inner.unload(id).await
+        }
+    }
+
+    // ── Recovery (execute_with_recovery) tests ────────────────────────────────
+
+    #[derive(Debug)]
+    struct FixedPathRule(String);
+
+    impl Replanner for FixedPathRule {
+        fn propose(
+            &self,
+            failure: &FailureContext,
+            program: &CirProgram,
+        ) -> Option<RecoveryProposal> {
+            let failing = program.nodes.iter().find(|n| n.node_id == failure.node_id)?;
+            let mut root = failing.clone();
+            root.kind = CirNodeKind::PrimitiveInvocation;
+            root.capability = Some("read_file".into());
+            root.children = vec![];
+            root.control = None;
+            root.inputs = vec![(
+                "path".into(),
+                serde_json::Value::String(self.0.clone()),
+            )]
+            .into_iter()
+            .collect();
+            Some(RecoveryProposal {
+                replace_node: failure.node_id.clone(),
+                subgraph: vec![root],
+                reason: "fallback to local read".into(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn recovery_replaces_failing_node_and_completes() {
+        let dir = std::env::temp_dir().join(format!("acos-recover-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("fallback.txt"), "cached").unwrap();
+        let fallback_path = dir.join("fallback.txt").to_string_lossy().to_string();
+
+        let nodes = vec![
+            CirNode {
+                kind: CirNodeKind::Sequence,
+                node_id: "root".into(),
+                capability: None,
+                output: None,
+                children: vec!["search".into(), "write".into()],
+                else_children: vec![],
+                inputs: HashMap::new(),
+                control: None,
+            },
+            CirNode {
+                kind: CirNodeKind::PrimitiveInvocation,
+                node_id: "search".into(),
+                capability: Some("flaky_search".into()),
+                output: Some("results".into()),
+                children: vec![],
+                else_children: vec![],
+                inputs: HashMap::new(),
+                control: None,
+            },
+            CirNode {
+                kind: CirNodeKind::PrimitiveInvocation,
+                node_id: "write".into(),
+                capability: Some("write_file".into()),
+                output: Some("ref".into()),
+                children: vec![],
+                else_children: vec![],
+                inputs: vec![
+                    (
+                        "path".into(),
+                        serde_json::Value::String(
+                            dir.join("out.txt").to_string_lossy().to_string(),
+                        ),
+                    ),
+                    ("content".into(), serde_json::Value::String("${results}".into())),
+                ]
+                .into_iter()
+                .collect(),
+                control: None,
+            },
+        ];
+        let mut program = program_from(nodes);
+        program.effects = vec![
+            EffectDecl {
+                kind: EffectKind::NetworkRead,
+                description: "search".into(),
+                reversible: true,
+            },
+            EffectDecl {
+                kind: EffectKind::FsRead,
+                description: "read".into(),
+                reversible: true,
+            },
+            EffectDecl {
+                kind: EffectKind::FsWrite,
+                description: "write".into(),
+                reversible: true,
+            },
+        ];
+
+        let store: Arc<dyn EventStore + Send + Sync> = Arc::new(InMemoryStore::new());
+        let astore: Arc<dyn ArtifactStore + Send + Sync> = Arc::new(InMemoryStore::new());
+        let runtime = RuntimeImpl::with_registry(store.clone(), astore, FlakyRegistry::new());
+        let rule = FixedPathRule(fallback_path);
+        let ctx = RecoveryContext {
+            rule: Some(&rule),
+            model: None,
+        };
+        let report = runtime
+            .execute_with_recovery(program, Some(&ctx))
+            .await
+            .unwrap();
+        assert_eq!(report.status, RunStatus::Completed);
+        let events = store.query(report.run_id).await.unwrap();
+        assert!(events.iter().any(|e| e.event_type == "replan.started"));
+        assert!(events.iter().any(|e| e.event_type == "replan.completed"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn proposal_must_reuse_replace_node_id() {
+        let program = program_from(vec![primitive_node("a", "search", None)]);
+        let bad = RecoveryProposal {
+            replace_node: "a".into(),
+            subgraph: vec![primitive_node("b", "search", None)],
+            reason: "bad root id".into(),
+        };
+        let store: Arc<dyn EventStore + Send + Sync> = Arc::new(InMemoryStore::new());
+        let astore: Arc<dyn ArtifactStore + Send + Sync> = Arc::new(InMemoryStore::new());
+        let runtime = RuntimeImpl::with_registry(store.clone(), astore, FlakyRegistry::new());
+        let err = runtime.validate_proposal(&program, &bad).await.unwrap_err();
+        assert!(err.to_string().contains("reuse replace_node"));
     }
 }

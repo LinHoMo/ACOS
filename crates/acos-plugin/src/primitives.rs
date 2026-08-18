@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use acos_core::error::AcosError;
 use acos_core::traits::{CapabilityDesc, Primitive};
-use acos_core::types::{EffectDecl, EffectKind};
+use acos_core::types::{EffectDecl, EffectKind, FailureClass};
 use acos_core::types::{TypedValue, ValueType};
 
 /// `search` — network read; returns an empty document list for MVP.
@@ -88,6 +88,7 @@ impl Primitive for ReadFilePrimitive {
             .ok_or_else(|| AcosError::PrimitiveFailure {
                 message: "read_file requires a 'path' string".into(),
                 primitive_id: Some("read_file".into()),
+                class: FailureClass::Unknown,
             })?;
 
         let content = tokio::fs::read_to_string(path)
@@ -95,6 +96,7 @@ impl Primitive for ReadFilePrimitive {
             .map_err(|e| AcosError::PrimitiveFailure {
                 message: format!("failed to read {path}: {e}"),
                 primitive_id: Some("read_file".into()),
+                class: FailureClass::Unknown,
             })?;
 
         Ok(TypedValue {
@@ -148,6 +150,7 @@ impl Primitive for WriteFilePrimitive {
             .ok_or_else(|| AcosError::PrimitiveFailure {
                 message: "write_file requires a 'path' string".into(),
                 primitive_id: Some("write_file".into()),
+                class: FailureClass::Unknown,
             })?;
 
         let content = input
@@ -165,6 +168,7 @@ impl Primitive for WriteFilePrimitive {
             .map_err(|e| AcosError::PrimitiveFailure {
                 message: format!("failed to write {path}: {e}"),
                 primitive_id: Some("write_file".into()),
+                class: FailureClass::Unknown,
             })?;
 
         Ok(TypedValue {
@@ -231,6 +235,7 @@ impl Primitive for ExecutePythonPrimitive {
             .ok_or_else(|| AcosError::PrimitiveFailure {
                 message: "execute_python requires a 'code' string".into(),
                 primitive_id: Some("execute_python".into()),
+                class: FailureClass::Unknown,
             })?;
 
         let python = ["python3", "python", "py"]
@@ -250,6 +255,7 @@ impl Primitive for ExecutePythonPrimitive {
             .map_err(|e| AcosError::PrimitiveFailure {
                 message: format!("failed to spawn python: {e}"),
                 primitive_id: Some("execute_python".into()),
+                class: FailureClass::Unknown,
             })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -259,6 +265,7 @@ impl Primitive for ExecutePythonPrimitive {
             return Err(AcosError::PrimitiveFailure {
                 message: format!("python exited {:?}: {stderr}", output.status.code()),
                 primitive_id: Some("execute_python".into()),
+                class: FailureClass::Unknown,
             });
         }
 
