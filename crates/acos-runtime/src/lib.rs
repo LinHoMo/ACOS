@@ -118,6 +118,17 @@ impl RuntimeImpl {
         program: CirProgram,
         recovery: Option<&RecoveryContext<'_>>,
     ) -> Result<RunReport, AcosError> {
+        self.execute_with_env(program, recovery, HashMap::new()).await
+    }
+
+    /// Executes a program with a pre-seeded environment (for Golden CIR testing
+    /// and programmatic invocation where inputs are already materialized).
+    pub async fn execute_with_env(
+        &self,
+        program: CirProgram,
+        recovery: Option<&RecoveryContext<'_>>,
+        seed_env: HashMap<String, TypedValue>,
+    ) -> Result<RunReport, AcosError> {
         let run_id = RunId::new();
         self.event_store
             .append(
@@ -127,7 +138,7 @@ impl RuntimeImpl {
             )
             .await?;
 
-        let env = Arc::new(Mutex::new(HashMap::<String, TypedValue>::new()));
+        let env = Arc::new(Mutex::new(seed_env));
         let mut program = program;
         let mut attempts = 0u32;
 
@@ -957,23 +968,62 @@ impl RuntimeImpl {
 }
 
 /// Resolves a `$name` or `${name}` reference to its string form.
+///
+/// If the entire string is a single reference, returns the resolved value.
+/// Otherwise, performs template interpolation: every `${name}` substring is
+/// replaced with the resolved value (supports embedded references inside
+/// larger strings like Python source code).
 async fn resolve_ref(ref_str: &str, env: &Arc<Mutex<HashMap<String, TypedValue>>>) -> String {
-    let name = if ref_str.starts_with("${") && ref_str.ends_with("}") {
-        &ref_str[2..ref_str.len() - 1]
-    } else if ref_str.starts_with('$') {
-        &ref_str[1..]
-    } else {
-        return ref_str.to_string();
-    };
-    let guard = env.lock().await;
-    if let Some(tv) = guard.get(name) {
-        match &tv.payload {
-            Value::String(s) => s.clone(),
-            other => other.to_string(),
-        }
-    } else {
-        ref_str.to_string()
+    // Fast path: the whole string is exactly one reference.
+    if ref_str.starts_with("${") && ref_str.ends_with("}") {
+        let name = &ref_str[2..ref_str.len() - 1];
+        let guard = env.lock().await;
+        return if let Some(tv) = guard.get(name) {
+            match &tv.payload {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            }
+        } else {
+            ref_str.to_string()
+        };
+    } else if ref_str.starts_with('$') && !ref_str[1..].contains(' ') {
+        let name = &ref_str[1..];
+        let guard = env.lock().await;
+        return if let Some(tv) = guard.get(name) {
+            match &tv.payload {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            }
+        } else {
+            ref_str.to_string()
+        };
     }
+
+    // Slow path: template interpolation — replace all `${name}` occurrences.
+    let mut result = String::with_capacity(ref_str.len());
+    let mut rest = ref_str;
+    while let Some(start) = rest.find("${") {
+        result.push_str(&rest[..start]);
+        if let Some(end) = rest[start..].find('}') {
+            let name = &rest[start + 2..start + end];
+            let guard = env.lock().await;
+            let replacement = if let Some(tv) = guard.get(name) {
+                match &tv.payload {
+                    Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                }
+            } else {
+                format!("${{{name}}}")
+            };
+            result.push_str(&replacement);
+            rest = &rest[start + end + 1..];
+        } else {
+            result.push_str(&rest[start..]);
+            rest = "";
+        }
+    }
+    result.push_str(rest);
+    result
 }
 
 /// Re-export as `Runtime` for convenience.

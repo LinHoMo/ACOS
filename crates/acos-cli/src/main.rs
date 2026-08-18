@@ -3,6 +3,7 @@
 //! MVP commands:
 //!   acos compile <task.yaml>   — compile a task spec to CIR and print it
 //!   acos run <task.yaml>       — compile and execute a task
+//!   acos run-cir <cir.json>    — execute a pre-compiled CIR program directly
 //!
 //! Planner selection:
 //!   - Default: **ModelCompiler** (Claude via LongCat). Set `LONGCAT_API_KEY`
@@ -19,10 +20,11 @@ use acos_compiler::{ModelCompiler, RuleCompiler};
 use acos_core::error::AcosError;
 use acos_core::schema::from_yaml;
 use acos_core::traits::Compiler;
-use acos_core::types::TaskSpec;
+use acos_core::types::{CirProgram, TaskSpec, TypedValue, ValueType};
 use acos_runtime::Runtime;
 use acos_state::InMemoryStore;
 use acos_verify::verify_run;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[tokio::main]
@@ -77,6 +79,15 @@ async fn main() -> Result<(), AcosError> {
             report.print();
             std::process::exit(if report.failed() == 0 { 0 } else { 1 });
         }
+        Some("run-cir") => {
+            // acos run-cir <cir.json> [--env <env.json>]
+            let path = positional.get(2).expect("usage: acos run-cir <cir.json> [--env <env.json>]");
+            let env_path = match args.iter().position(|a| a == "--env") {
+                Some(idx) => args.get(idx + 1).map(|s| s.as_str()),
+                None => None,
+            };
+            run_cir(path, env_path).await
+        }
         Some("compile") => {
             let path = positional.get(2).expect("usage: acos compile <task.yaml>");
             let task = read_task(path).await?;
@@ -116,7 +127,7 @@ async fn main() -> Result<(), AcosError> {
             Ok(())
         }
         _ => {
-            eprintln!("usage: acos <compile|run|bench> <task.yaml> [--rules]");
+            eprintln!("usage: acos <compile|run|run-cir|bench> [args]");
             std::process::exit(1);
         }
     }
@@ -145,4 +156,78 @@ async fn compile(task: &TaskSpec, use_rules: bool) -> Result<acos_core::traits::
             RuleCompiler::new().compile(task.clone()).await
         }
     }
+}
+
+/// Loads a CIR JSON file and runs it directly, bypassing the compiler.
+async fn run_cir(path: &str, env_path: Option<&str>) -> Result<(), AcosError> {
+    let json = tokio::fs::read_to_string(path)
+        .await
+        .map_err(|e| AcosError::ValidationFailure {
+            message: format!("failed to read {path}: {e}"),
+        })?;
+    let program: CirProgram = serde_json::from_str(&json).map_err(|e| {
+        AcosError::ValidationFailure {
+            message: format!("failed to parse CIR JSON: {e}"),
+        }
+    })?;
+
+    let seed_env = match env_path {
+        Some(env_path) => {
+            let env_json = tokio::fs::read_to_string(env_path)
+                .await
+                .map_err(|e| AcosError::ValidationFailure {
+                    message: format!("failed to read {env_path}: {e}"),
+                })?;
+            parse_env_json(&env_json)?
+        }
+        None => HashMap::new(),
+    };
+
+    let event_store: std::sync::Arc<dyn acos_core::traits::EventStore + Send + Sync> =
+        std::sync::Arc::new(InMemoryStore::new());
+    let artifact_store: std::sync::Arc<dyn acos_core::traits::ArtifactStore + Send + Sync> =
+        std::sync::Arc::new(InMemoryStore::new());
+    let runtime = Runtime::new(event_store.clone(), artifact_store);
+    let report = runtime.execute_with_env(program, None, seed_env).await?;
+
+    println!("Run {}: {:?}", report.run_id.0, report.status);
+    println!("Artifacts: {:?}", report.artifacts);
+    println!("Evidence: {} items", report.evidence.len());
+
+    let verification = verify_run(&*event_store, report.run_id).await?;
+    println!(
+        "Verification: {}",
+        if verification.all_passed() { "PASSED" } else { "FAILED" }
+    );
+    Ok(())
+}
+
+/// Parses a JSON object of {name: {valueType, payload}} into a TypedValue map.
+fn parse_env_json(json: &str) -> Result<HashMap<String, TypedValue>, AcosError> {
+    let raw: HashMap<String, serde_json::Value> =
+        serde_json::from_str(json).map_err(|e| AcosError::ValidationFailure {
+            message: format!("failed to parse env JSON: {e}"),
+        })?;
+    let mut env = HashMap::new();
+    for (key, val) in raw {
+        let tv = if let Some(obj) = val.as_object() {
+            let vt = match obj.get("valueType").and_then(|v| v.as_str()) {
+                Some("List") => ValueType::List,
+                Some("Record") => ValueType::Record,
+                Some("Optional") => ValueType::Optional,
+                _ => ValueType::Scalar,
+            };
+            TypedValue {
+                value_type: vt,
+                payload: obj.get("payload").cloned().unwrap_or(serde_json::Value::Null),
+            }
+        } else {
+            TypedValue {
+                value_type: ValueType::Scalar,
+                payload: val,
+            }
+        };
+        env.insert(key, tv);
+    }
+    Ok(env)
 }
