@@ -92,6 +92,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("  final error: {err}");
         }
 
+        let (contract_pass, contract_error) = if let Ok(ref result) = traced.result {
+            match acos_compiler::validate_cir(&result.program) {
+                Ok(()) => (true, None),
+                Err(e) => (false, Some(e.to_string())),
+            }
+        } else {
+            (false, Some("compile failed".to_string()))
+        };
+        let contract = serde_json::json!({
+            "pass": contract_pass,
+            "error": contract_error,
+        });
+        if contract_pass {
+            println!("  contract: PASS (R1-R5)");
+        } else {
+            println!(
+                "  contract: FAIL {}",
+                contract_error.as_deref().unwrap_or("unknown")
+            );
+        }
+
         let behavioral = if let Ok(ref result) = traced.result {
             let analysis = analyze_behavioral_requirements(&result.program, &declared_paths);
             println!("  behavioral: {}/7 PASS", analysis.pass_count);
@@ -153,7 +174,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let trace_json = build_trace_json(
             run_idx, &task_path, &traced, compile_ok,
-            run_start.elapsed().as_millis() as u64, behavioral, execution,
+            run_start.elapsed().as_millis() as u64, behavioral, execution, contract,
         );
         tokio::fs::write(&trace_path, trace_json).await?;
         println!("  trace saved: {}", trace_path.display());
@@ -366,10 +387,11 @@ fn days_to_date(days: u64) -> String {
     format!("{year}-{month:02}-{day:02}")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_trace_json(
     run_idx: usize, task_path: &str, traced: &acos_compiler::TracedCompile,
     compile_success: bool, wall_ms: u64, behavioral: Option<serde_json::Value>,
-    execution: serde_json::Value,
+    execution: serde_json::Value, contract: serde_json::Value,
 ) -> String {
     let t = &traced.trace;
     let program = traced.result.as_ref().ok().map(|r| &r.program);
@@ -399,6 +421,7 @@ fn build_trace_json(
 
     let record = serde_json::json!({
         "run": { "run_index": run_idx, "timestamp": iso_timestamp(), "model": "LongCat-2.0", "compile_success": compile_success, "final_error": t.final_error },
+        "contract": contract,
         "input": { "task_spec_path": task_path, "prompt_sent": t.initial_prompt },
         "output": {
             "initial_raw_response": t.initial_response,
