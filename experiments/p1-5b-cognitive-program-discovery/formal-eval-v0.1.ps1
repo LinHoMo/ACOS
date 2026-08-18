@@ -30,7 +30,7 @@ if ($LASTEXITCODE -ne 0) { Write-Error "p1-5b-probe failed" }
 Write-Host "=== P1-5B Formal v0.1: RuleCompiler x $RuleRuns ==="
 for ($i = 1; $i -le $RuleRuns; $i++) {
     $runId = "run-{0:000}" -f $i
-    $out = & cargo run --quiet -p acos-cli -- run $Task --rules 2>&1 | Out-String
+    $out = & cargo run --quiet -p acos-cli --bin acos -- run $Task --rules 2>&1 | Out-String
     $completed = $out -match "Run .*: Completed"
     $verdict = if ($out -match "Verification: (PASSED|FAILED)") { $Matches[1] } else { "UNKNOWN" }
     [ordered]@{ compile = if ($completed) { "pass" } else { "fail" }; execute = if ($completed) { "pass" } else { "fail" }; adequacy = $verdict.ToLower(); raw = $out } |
@@ -43,7 +43,7 @@ Write-Host "=== P1-5B Formal v0.1: Baseline x $BaselineRuns ==="
 for ($i = 1; $i -le $BaselineRuns; $i++) {
     $runId = "run-{0:000}" -f $i
     $reportPath = Join-Path $baseDir "$runId-report.md"
-    $out = & cargo run --quiet -p acos-cli -- baseline $Goal --verify $GT --output $reportPath 2>&1 | Out-String
+    $out = & cargo run --quiet -p acos-cli --bin acos -- baseline $Goal --verify $GT --output $reportPath 2>&1 | Out-String
     $verdict = if ($out -match "Overall: (PASSED|FAILED)") { $Matches[1] } else { "UNKNOWN" }
     $turns = if ($out -match "turns[=: ]+(\d+)") { $Matches[1] } else { "?" }
     [ordered]@{ execute = "pass"; adequacy = $verdict.ToLower(); turns = $turns; raw = $out } |
