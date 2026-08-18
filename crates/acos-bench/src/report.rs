@@ -88,8 +88,8 @@ impl BenchReport {
     pub fn print(&self) {
         println!("ACOS Benchmark v0.1");
         println!(
-            "{:<28} {:<6} {:<8} {:<8} {:<8} {:<16} {}",
-            "Case", "Result", "Compile", "Execute", "Recover", "Detail", "Note"
+            "{:<28} {:<6} {:<8} {:<8} {:<8} {:<16} Note",
+            "Case", "Result", "Compile", "Execute", "Recover", "Detail"
         );
         println!("{}", "-".repeat(76));
         for case in &self.cases {

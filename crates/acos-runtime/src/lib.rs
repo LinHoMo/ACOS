@@ -961,12 +961,12 @@ impl RuntimeImpl {
         ref_str: &str,
         env: &Arc<Mutex<HashMap<String, TypedValue>>>,
     ) -> Option<TypedValue> {
-        let name = if ref_str.starts_with("${") && ref_str.ends_with('}') {
-            &ref_str[2..ref_str.len() - 1]
-        } else if ref_str.starts_with('$') {
-            &ref_str[1..]
-        } else {
-            return None;
+        let name = match ref_str.strip_prefix("${").and_then(|s| s.strip_suffix('}')) {
+            Some(inner) => inner,
+            None => match ref_str.strip_prefix('$') {
+                Some(stripped) => stripped,
+                None => return None,
+            },
         };
         env.lock().await.get(name).cloned()
     }
@@ -1003,7 +1003,7 @@ impl RuntimeImpl {
     ) -> TypedValue {
         let resolved = resolve_ref(raw.as_str().unwrap_or(&raw.to_string()), env).await;
         let payload = serde_json::from_str::<Value>(&resolved)
-            .unwrap_or_else(|_| Value::String(resolved));
+            .unwrap_or(Value::String(resolved));
         let value_type = match &payload {
             Value::Array(_) => ValueType::List,
             Value::Object(_) => ValueType::Record,

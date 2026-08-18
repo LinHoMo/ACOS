@@ -90,6 +90,27 @@ pub enum AcosError {
     },
 }
 
+impl AcosError {
+    /// Returns `true` if this error represents a failure that requires
+    /// human intervention (compensation failures always do).
+    pub fn requires_human_intervention(&self) -> bool {
+        matches!(self, AcosError::CompensationFailure { .. })
+    }
+
+    /// Classifies this error for retry/recovery decisions.
+    ///
+    /// This is the single classification entry point; runtime code must not
+    /// pattern-match on error strings.
+    pub fn classify(&self) -> crate::types::FailureClass {
+        use crate::types::FailureClass;
+        match self {
+            AcosError::PrimitiveFailure { class, .. } => class.clone(),
+            AcosError::ProviderFailure { .. } => FailureClass::TransientNetworkError,
+            _ => FailureClass::Unknown,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,26 +146,5 @@ mod tests {
         let json = r#"{"message":"m","primitive_id":null}"#;
         let e: AcosError = serde_json::from_str(json).unwrap();
         assert_eq!(e.classify(), FailureClass::Unknown);
-    }
-}
-
-impl AcosError {
-    /// Returns `true` if this error represents a failure that requires
-    /// human intervention (compensation failures always do).
-    pub fn requires_human_intervention(&self) -> bool {
-        matches!(self, AcosError::CompensationFailure { .. })
-    }
-
-    /// Classifies this error for retry/recovery decisions.
-    ///
-    /// This is the single classification entry point; runtime code must not
-    /// pattern-match on error strings.
-    pub fn classify(&self) -> crate::types::FailureClass {
-        use crate::types::FailureClass;
-        match self {
-            AcosError::PrimitiveFailure { class, .. } => class.clone(),
-            AcosError::ProviderFailure { .. } => FailureClass::TransientNetworkError,
-            _ => FailureClass::Unknown,
-        }
     }
 }

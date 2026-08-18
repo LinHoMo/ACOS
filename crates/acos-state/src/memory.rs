@@ -12,11 +12,14 @@ use acos_core::error::AcosError;
 use acos_core::id::{ArtifactId, RunId};
 use acos_core::traits::{ArtifactStore, Event, EventStore};
 
+/// (run id, artifact kind, artifact bytes)
+type ArtifactEntry = (RunId, String, Vec<u8>);
+
 /// An in-memory event + artifact store.
 #[derive(Debug, Clone)]
 pub struct InMemoryStore {
     events: Arc<Mutex<HashMap<RunId, Vec<Event>>>>,
-    artifacts: Arc<Mutex<HashMap<ArtifactId, (RunId, String, Vec<u8>)>>>,
+    artifacts: Arc<Mutex<HashMap<ArtifactId, ArtifactEntry>>>,
     seq: Arc<Mutex<HashMap<RunId, u64>>>,
 }
 

@@ -17,7 +17,7 @@ use serde::Deserialize;
 // ── Ground Truth types ──────────────────────────────────────────────────────
 
 /// Ground truth for a single CSV file.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct FileTruth {
     /// Display name (e.g., "Q1 Sales").
     #[serde(default)]
@@ -69,31 +69,8 @@ pub struct FileTruth {
     pub issues: Vec<String>,
 }
 
-impl Default for FileTruth {
-    fn default() -> Self {
-        Self {
-            display_name: String::new(),
-            raw_row_count: 0,
-            column_count: 0,
-            columns: Vec::new(),
-            total_revenue: None,
-            total_units: None,
-            unique_row_count: None,
-            has_duplicates: false,
-            has_missing_values: false,
-            has_negative_values: false,
-            has_outliers: false,
-            has_column_drift: false,
-            has_currency_format: false,
-            categories: Vec::new(),
-            issue_count: 0,
-            issues: Vec::new(),
-        }
-    }
-}
-
 /// Aggregate statistics across all files.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct AggregateTruth {
     /// Total files processed.
     #[serde(default)]
@@ -116,20 +93,6 @@ pub struct AggregateTruth {
     /// Required data points that must appear.
     #[serde(default)]
     pub required_data_points: Vec<String>,
-}
-
-impl Default for AggregateTruth {
-    fn default() -> Self {
-        Self {
-            total_files: 0,
-            total_raw_rows: 0,
-            files_with_issues: 0,
-            clean_files: 0,
-            grand_total_revenue: None,
-            required_sections: Vec::new(),
-            required_data_points: Vec::new(),
-        }
-    }
 }
 
 /// Parsed ground truth configuration.
@@ -353,9 +316,9 @@ pub fn check_semantic(
 
             // Try multiple keyword patterns
             let keywords = [
-                &format!("{} revenue", q_name),
-                &format!("{}", q_name),
-                &format!("revenue {}", q_name),
+                format!("{} revenue", q_name),
+                q_name.to_string(),
+                format!("revenue {}", q_name),
             ];
 
             let mut found_match = false;

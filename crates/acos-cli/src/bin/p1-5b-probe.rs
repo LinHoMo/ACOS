@@ -330,7 +330,7 @@ fn analyze_behavioral_requirements(
 
     // BR-7: No Hallucinated Resources
     let undeclared: Vec<_> = generated_paths
-        .difference(&declared_paths)
+        .difference(declared_paths)
         .filter(|p| !item_vars.contains(*p))
         .collect();
     let no_hallu = undeclared.is_empty();

@@ -391,7 +391,7 @@ impl ModelCompiler {
                 }
                 out.push('\n');
             }
-            out.push_str("\n");
+            out.push('\n');
         }
 
         // ── Required Outputs ─────────────────────────────────────────────
@@ -597,10 +597,10 @@ impl ModelCompiler {
                     ),
                 });
                 trace.timing.total_ms = total_start.elapsed().as_millis() as u64;
-                return TracedCompile {
+                TracedCompile {
                     result: Ok(CompileResult { program, diagnostics }),
                     trace,
-                };
+                }
             }
             Err(first_error) => {
                 trace.initial_error = Some(first_error.to_string());
@@ -1002,7 +1002,7 @@ fn validate_cir_semantic(program: &CirProgram) -> Result<(), CompilerError> {
     // graph, so execution "succeeded" with no artifact produced.
     let mut reachable: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut stack: Vec<&str> = program.entry.iter().map(String::as_str).collect();
-    let mut by_id: std::collections::HashMap<&str, &CirNode> = program
+    let by_id: std::collections::HashMap<&str, &CirNode> = program
         .nodes
         .iter()
         .map(|n| (n.node_id.as_str(), n))

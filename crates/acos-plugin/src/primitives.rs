@@ -294,11 +294,17 @@ pub struct SummarizePrimitive {
     llm: Option<acos_llm::LongCatClient>,
 }
 
+impl Default for SummarizePrimitive {
+    fn default() -> Self {
+        let llm = acos_llm::LongCatClient::from_env().ok();
+        Self { llm }
+    }
+}
+
 impl SummarizePrimitive {
     /// Creates a summarize primitive, using an LLM if configured.
     pub fn new() -> Self {
-        let llm = acos_llm::LongCatClient::from_env().ok();
-        Self { llm }
+        Self::default()
     }
 }
 
