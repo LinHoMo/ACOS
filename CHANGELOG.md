@@ -13,6 +13,18 @@
 - `docs/adr-0001-user-space-runtime.md`：首个完整 ADR 示例文档
 - `CHANGELOG.md`：本文件
 
+### P0 — 控制语义 + 失败恢复 + 基准（2026-08-17）
+
+- **控制语义类型**：`CirNode.control`（`condition` / `loop_spec` / `retry`）与 `else_children`（`crates/acos-core`）
+- **编译期校验**：`acos_compiler::validate_cir` 校验条件标识符、循环 `max_iterations >= 1`、重试 `max_attempts >= 1`、不可逆原语禁止重试
+- **失败分类**：`FailureClass`（timeout / rate_limit / transient / invalid_input / permission_denied / syntax_error / unknown）
+- **运行时控制执行**：conditional / loop_map（while / until / for_each）/ retry 策略（`crates/acos-runtime`）
+- **恢复状态机**：`execute_with_recovery` + 事务式提交门（`MAX_RECOVERY_ATTEMPTS = 3`）
+- **RuleReplanner**：`OfflineFallbackRule` 将暂态失败节点替换为本地 `read_file` 回退
+- **ModelRecoveryPlanner**：LLM 生成 `RecoverySubgraph` 补丁（需 `LONGCAT_API_KEY`）
+- **基准套件**：`crates/acos-bench`（condition / loop / retry / recovery / negative 五套 fixture）+ CLI `acos bench [--suite S] [--case C] [--require-model]`
+- **CIR proto 同步**：`schemas/cir/cir.proto` 补齐 `control` / `else_children` 与 `ControlSpec` / `LoopSpec` / `RetryPolicy` 等消息
+
 ### Changed / 变更
 
 - 全部 32 个 Markdown 文档完成双语化（中文为主体，英文术语标注）

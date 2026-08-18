@@ -15,8 +15,11 @@ acos-state = { path = "../acos-state" }
 acos-plugin = { path = "../acos-plugin" }
 acos-verify = { path = "../acos-verify" }
 acos-llm = { path = "../acos-llm" }
-actix-web = "4"
-actix-files = "0.6"
+# NOTE: `compress` 默认特性会经 actix-http 拉入 zstd-sys / brotli-sys（C 库，
+# 需要本机 C 编译器）。本仓库 CI/构建环境无 gcc，故关闭 compress 以解锁构建。
+# 服务端仅提供 JSON API + 静态文件，无需响应压缩。
+actix-web = { version = "4", default-features = false, features = ["macros", "http2"] }
+actix-files = { version = "0.6", default-features = false }
 dotenvy = "0.15"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

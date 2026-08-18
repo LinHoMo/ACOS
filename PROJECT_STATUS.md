@@ -68,13 +68,37 @@ cargo run -p acos-cli -- compile task.yaml       # 仅查看规划
 - [x] 12 个测试全部通过
 - [x] 端到端验证（Claude 规划 → 执行 → 工件 → 验证）
 
+## P0 里程碑（控制语义 + 失败恢复 + 基准）✅
+
+**目标**：让 CIR 支持条件分支、循环映射、暂态重试，并在运行时失败时有可验证的恢复路径；以 fixture 为契约的回归套件守护这些行为。
+
+- [x] **控制语义类型**（`CirNode.control`：`condition` / `loop_spec` / `retry`，`else_children`）
+- [x] **编译期校验**（`acos_compiler::validate_cir`：条件标识符、循环 `max_iterations >= 1`、`retry.max_attempts >= 1`、不可逆原语禁止重试）
+- [x] **失败分类**（`FailureClass`：timeout / rate_limit / transient / invalid_input / …）
+- [x] **运行时控制执行**（conditional / loop_map / retry 策略）
+- [x] **恢复状态机**（`execute_with_recovery`：transactional gate + `rule` / `model` 重规划，`MAX_RECOVERY_ATTEMPTS = 3`）
+- [x] **RuleReplanner**（`OfflineFallbackRule`：暂态失败替换为本地 `read_file` 回退）
+- [x] **ModelRecoveryPlanner**（LLM 生成 `RecoverySubgraph` 补丁；需 `LONGCAT_API_KEY`）
+- [x] **基准套件**（`crates/acos-bench`：condition / loop / retry / recovery / negative 五套 fixture，CLI `acos bench`）
+- [x] **全 workspace 构建/测试绿**：移除 `actix-web` `compress` 默认特性（其经 `zstd-sys`/`brotli-sys` 拉入需 gcc 的 C 依赖），并修复 `[workspace.lints]` 的 `lint_groups_priority` 冲突 → `cargo test --workspace` 与 `cargo clippy --workspace --all-targets` 现在可运行且无非新增 warning。
+
+### P0 已知限制 / P0 known limitations
+
+- `ModelRecoveryPlanner` 需 LLM key；无 key 时相关用例在 `--require-model` 下 FAIL，否则 SKIP。
+- `acos-expr` 禁止模糊引用与 `null` 字面量；条件需用 `exists(...)` / `not_exists(...)` / 显式比较。
+- `for_each` 当前串行（无并发）；`while`/`until` 必须显式 `max_iterations >= 1`。
+- 重试仅在暂态类生效，且节点原语须 retry-safe；`ExternalIrreversible` 效果禁止重试。
+- CIR proto（`schemas/cir/cir.proto`）已补齐 `control` / `else_children` 字段，但 `primitive_id` ↔ `capability` 命名尚未统一到 Rust。
+
 ## 下一步 / Next
 
-- [ ] 条件密集型任务验证（branch/loop/recovery）
+- [x] 条件密集型任务验证（branch/loop/recovery）→ P0 已完成
+- [x] 失败恢复与重规划（Test C）→ P0 已完成
+- [x] 恢复事件可视化（bench 报告新增 `Detail` 列：`replan:rule` / `retry(xN)`）→ P1 已完成
+- [ ] **P1 待办**：expr 增强、任务级保留绑定、ForEach 并发
 - [ ] Effect System（副作用声明与权限）
 - [ ] 经验回路（Phase 3，feature flag `experience-feedback`）
 - [ ] SQLite 持久化存储（Phase 2）
-- [ ] 失败恢复与重规划（Test C）
 - [ ] SDK 稳定化（TypeScript/Python）
 
 ## 尚未标准化 / Not yet standardized
@@ -90,3 +114,4 @@ cargo run -p acos-cli -- compile task.yaml       # 仅查看规划
 - 经验反馈回路已剥离（Phase 3）
 - SQLite 存储尚未实现（默认内存存储）
 - 无分布式多主机支持
+- 见上方「P0 已知限制」

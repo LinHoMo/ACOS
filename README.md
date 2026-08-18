@@ -85,6 +85,36 @@ cargo run -p acos-cli -- compile task.yaml
 cargo run -p acos-cli -- run task.yaml --rules
 ```
 
+### 6. 基准测试 / Benchmark
+
+`fixture-as-contract` 回归套件（P0：控制语义 + 失败恢复）。每个 fixture 是一份行为契约
+（CIR 程序 + 期望结果），由 `crates/acos-bench` 运行并聚合报告。
+
+```bash
+# 运行指定套件
+cargo run -p acos-cli -- bench --suite condition
+cargo run -p acos-cli -- bench --suite loop
+cargo run -p acos-cli -- bench --suite retry
+cargo run -p acos-cli -- bench --suite recovery
+cargo run -p acos-cli -- bench --suite negative
+
+# 全量
+cargo run -p acos-cli -- bench
+
+# CI 严格模式：未配置 LLM key 的 model 恢复用例视为失败
+cargo run -p acos-cli -- bench --require-model
+```
+
+套件说明：
+
+- `condition`：条件分支出（conditional + else_children）
+- `loop`：`for_each` / `while` 循环映射（loop_map）
+- `retry`：暂态失败的自动重试（retry）
+- `recovery`：`rule` 重规划（`OfflineFallbackRule` 本地回退）+ `model` 重规划（需 LLM key）
+- `negative`：编译期拒绝契约（缺 `max_iterations`、重试次数 0、对不可逆原语重试）
+
+恢复观测（rule/model/retry）来自运行期事件流，报告表 `Recover` 列显示命中的恢复标签。
+
 ### 5. 配置文件（.env）
 
 复制 `.env.example` 为 `.env` 并填入：
@@ -190,6 +220,7 @@ ACOS/
 │   ├── acos-verify/          # 验证流水线
 │   ├── acos-llm/             # LLM 提供者（龙猫/Anthropic）
 │   ├── acos-cli/             # 命令行入口
+│   ├── acos-bench/           # fixture-as-contract 基准回归套件
 │   └── acos-server/          # Web 服务器
 ├── schemas/                  # Protobuf / JSON Schema
 ├── static/                   # Web 前端

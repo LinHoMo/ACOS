@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use actix_files as fs;
-use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder};
+use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use serde::{Deserialize, Serialize};
 
 use acos_compiler::{ModelCompiler, RuleCompiler};
@@ -50,12 +50,6 @@ enum RunEvent {
     },
     /// A node started executing.
     NodeStart { node_id: String, kind: String },
-    /// A primitive was invoked.
-    Primitive {
-        node_id: String,
-        capability: String,
-        ok: bool,
-    },
     /// An artifact was produced.
     Artifact { name: String },
     /// A final report.
@@ -172,10 +166,7 @@ async fn run_task_collect(
         }
     };
 
-    // Emit primitive events (one per non-container node) and artifact events.
-    for node in &report.evidence {
-        let _ = node;
-    }
+    // Emit artifact events.
     for artifact in &report.artifacts {
         events.push(RunEvent::Artifact {
             name: artifact.clone(),

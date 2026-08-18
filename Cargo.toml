@@ -17,11 +17,13 @@ description = "Artificial Cognitive Orchestration System — a pluginized cognit
 [workspace.lints.rust]
 unsafe_code = "deny"
 missing_docs = "warn"
-rust_2018_idioms = "deny"
+# `priority = -1` 让 lint 组先于成员 lint 生效，避免与 clippy 组的
+# `lint_groups_priority` 冲突（同优先级下组与组/组与成员会编译失败）。
+rust_2018_idioms = { level = "deny", priority = -1 }
 
 [workspace.lints.clippy]
-all = "warn"
-pedantic = "warn"
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
 # Allow select pedantic lints that are too noisy for MVP
 module_name_repetitions = "allow"
 must_use_candidate = "allow"

@@ -35,9 +35,10 @@ Human Intent → Task Specification → Cognitive Compiler → CIR → Cognitive
 | 插件系统 | `acos-plugin` | ✅ 5 个内置原语 + 注册表 |
 | 验证流水线 | `acos-verify` | ✅ 完成 |
 | LLM 提供者 | `acos-llm` | ✅ 龙猫/Anthropic |
-| 命令行 | `acos-cli` | ✅ compile / run / --rules |
+| 命令行 | `acos-cli` | ✅ compile / run / bench / --rules |
+| 基准套件 | `acos-bench` | ✅ fixture-as-contract 回归（condition/loop/retry/recovery/negative） |
 | Web 服务器 | `acos-server` | ✅ actix-web + 单页前端 |
-| 测试 | — | ✅ 12 个测试全部通过 |
+| 测试 | — | ✅ 12 个核心测试 + 5 套 bench 契约 |
 
 ### 已验证场景 ✅
 
@@ -45,6 +46,9 @@ Human Intent → Task Specification → Cognitive Compiler → CIR → Cognitive
 2. **Claude 动态规划**：Claude 根据任务生成 CIR 执行图（非硬编码）
 3. **规则规划器**：确定性 read→summarize→write 流水线（无需 API key）
 4. **Web 端实时展示**：规划→编译→执行→验证全流程可视化
+5. **控制语义（P0）**：conditional 分支 + else_children、loop_map（while/until/for_each）由 `acos-compiler::validate_cir` 编译期校验
+6. **失败重试与恢复（P0）**：暂态失败自动重试（retry）；运行时 `execute_with_recovery` 在失败时按 `rule`（`OfflineFallbackRule` 本地回退）→ `model`（`ModelRecoveryPlanner`，需 key）重规划，事务式提交
+7. **基准契约（P0）**：`acos bench` 以 fixture 验证上述行为，覆盖 condition/loop/retry/recovery/negative 五套，含负例编译期拒绝
 
 ---
 
@@ -168,6 +172,19 @@ cargo run -p acos-cli -- run task.yaml --rules   # 规则规划
   - `GET /api/health` — 健康检查
 - 自动加载 `.env`（via dotenvy）
 
+### 5.5 控制语义与恢复（P0）
+
+`CirNode` 新增 `control` 字段（`condition` / `loop_spec` / `retry`）与 `else_children`：
+
+- **编译期**：`acos_compiler::validate_cir` 校验条件标识符、循环 `max_iterations >= 1`、重试 `max_attempts >= 1`，并拒绝在 `ExternalIrreversible` 原语上重试。
+- **运行期**：`RuntimeImpl::execute_with_recovery` 执行图；节点 `control.retry` 触发暂态重试；失败时按以下顺序恢复：
+  1. `rule` 重规划（`RuleReplanner` + `OfflineFallbackRule`）：暂态类失败将失败节点替换为本地 `read_file` 回退。
+  2. `model` 重规划（`ModelRecoveryPlanner`）：LLM 生成 `RecoverySubgraph` 补丁，**仅当配置了 `LONGCAT_API_KEY`**。
+- 每次重规划提交为事务式补丁（事件 `replan.started` / `replan.completed` / `replan.rejected`），最多 `MAX_RECOVERY_ATTEMPTS = 3` 次。
+- 恢复标签（rule/model/retry）可由 `acos bench` 的 `Recover` 列观测。
+
+> **操作细节**：`--require-model` 把未配置 model 的 `model` 恢复用例从 SKIP 翻转为 FAIL，供 CI 严格模式使用。`ModelRecoveryPlanner::from_env()` 在无 key 时返回 `Err`，runner 据此判定 SKIP。
+
 ---
 
 ## 6. 配置 / Configuration
@@ -213,7 +230,7 @@ cargo test -p acos-runtime
 1. **LLM 命名不一致**：Claude 生成的引用名可能与 output 名不精确匹配。已通过模糊引用匹配缓解，但非根本解决。
 2. **经验反馈回路**：已剥离到 Phase 3（feature flag `experience-feedback`）。
 3. **SQLite 存储**：未实现，默认内存存储。
-4. **失败恢复**：无自动重规划（Test C 待做）。
+4. **失败恢复**：已由 P0 的 `execute_with_recovery` + `rule`/`model` 重规划覆盖（Test C 完成）；`model` 恢复仍需 LLM key。
 5. **Effect System**：副作用声明与权限模型待完善。
 6. **分布式**：无多主机支持。
 
@@ -224,8 +241,8 @@ cargo test -p acos-runtime
 按优先级：
 
 ### 高优先级（验证核心命题）
-1. **条件密集型任务**：验证 branch/loop/recovery（Test B）
-2. **失败恢复任务**：验证运行时失败 → 重规划（Test C）
+1. **条件密集型任务**：branch/loop/recovery 已由 P0 完成（Test B ✅）
+2. **失败恢复任务**：运行时失败 → 重规划 已由 P0 完成（Test C ✅）
 3. **Effect System**：每个原语声明 effects/permissions
 
 ### 中优先级（工程化）
