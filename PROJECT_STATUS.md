@@ -153,11 +153,23 @@ cargo run -p acos-cli -- run-cir <cir.json> [--env <env.json>] [--verify <ground
 - 当前 Golden CIR 仅用于 Runtime 验证，不代表 Compiler 能力
 - Baseline 端到端测试需 `LONGCAT_API_KEY`（无 key 时跳过）
 - Baseline 当前使用 flat conversation（非 true multi-turn API），v0.2 足够但长期可改进
+- **ModelCompiler 当前不可用**（LLM 返回空 JSON，需修复）
+
+## 第一轮实验结果
+
+```text
+ACOS RuleCompiler:  5/5 PASSED (100%)  [确定性，零方差]
+Baseline:           0/5 PASSED (0%)    [高方差，每次自信地失败]
+ModelCompiler:      0/1 (编译器失败)
+```
+
+**核心结论**: Cognitive Compilation 产生可测量价值。下一步修复 ModelCompiler。
 
 ## 尚未开始 / Not yet started
 
-- P1-4 Fixed Workflow Baseline
-- P1-5 ModelCompiler Comparative Evaluation
+- 修复 ModelCompiler（最高优先级）
+- P1-4 Fixed Workflow Baseline（等 ModelCompiler 修好）
+- P1-5 ModelCompiler Comparative Evaluation（等 ModelCompiler 修好）
 - Effect System（副作用声明与权限）
 - 经验回路（Phase 3，feature flag `experience-feedback`）
 - SQLite 持久化存储（Phase 2）
