@@ -5,12 +5,99 @@
 架构已收敛为用户空间认知运行时（user-space cognitive runtime），采用编译器/运行时分离（compiler/runtime split）。
 
 **ACOS Mini MVP 已完成并验证**：
-- 7 个核心 Rust crate 实现
+- 9 个核心 Rust crate 实现
 - 认知编译器（规则优先 + Claude 模型辅助）
 - 运行时执行引擎
+- 验证流水线（三层确定性验证）
 - Web 端（`acos-server`，端口 8080）
-- 12 个测试全部通过
+- 全部测试通过
 - 端到端验证：目标 → 编译 → 执行 → 工件 → 验证
+
+## P0 里程碑（控制语义 + 失败恢复 + 基准）✅
+
+**目标**：让 CIR 支持条件分支、循环映射、暂态重试，并在运行时失败时有可验证的恢复路径；以 fixture 为契约的回归套件守护这些行为。
+
+- [x] **控制语义类型**（`CirNode.control`：`condition` / `loop_spec` / `retry`，`else_children`）
+- [x] **编译期校验**（`acos_compiler::validate_cir`）
+- [x] **失败分类**（`FailureClass`：timeout / rate_limit / transient / invalid_input / …）
+- [x] **运行时控制执行**（conditional / loop_map / retry 策略）
+- [x] **恢复状态机**（`execute_with_recovery`：transactional gate + `rule` / `model` 重规划）
+- [x] **RuleReplanner**（`OfflineFallbackRule`）
+- [x] **ModelRecoveryPlanner**（LLM 生成 `RecoverySubgraph` 补丁）
+- [x] **基准套件**（`crates/acos-bench`：condition / loop / retry / recovery / negative 五套 fixture）
+- [x] **全 workspace 构建/测试绿**
+
+## P1 里程碑（可靠性与对比评估）🔬
+
+**目标**：通过实证对比，验证 ACOS 的 Cognitive Compiler + Runtime 是否比传统 Agent/Workflow 方法具有真实优势。
+
+### P1-0 Flagship Task ✅
+
+- [x] 旗舰基准任务定义（`tests/benchmarks/p1/flagship_csv_quality/`）
+- [x] 4 个 CSV 数据集（含不同扰动模式）
+- [x] 期望行为与输出规范（`expected/schema.yaml`）
+- [x] ACOS TaskSpec（`acos_task.yaml`）
+
+### P1-1 Golden CIR / Runtime Validation ✅
+
+- [x] 手写 Golden CIR（8 节点：sequence → forEach → validate → conditional → repair → analyze_with_retry → merge_report）
+- [x] `run-cir` CLI 子命令（直接执行 CIR，支持 `--env` 注入）
+- [x] 环境注入（`execute_with_env`）
+- [x] 模板插值增强（`${name}` 在任意字符串中解析）
+- [x] Runtime 独立验证（13 项证据，Completed 状态）
+
+### P1-2 Semantic Verification ✅
+
+- [x] Ground Truth 数据集统计（`expected/ground_truth.yaml`）
+- [x] 三层确定性验证器（`acos-verify`）：
+  - **Structural**：artifact 存在、非空、必需章节
+  - **Semantic**：数值声明 vs Ground Truth 一致性
+  - **Evidence**：事件日志完整性
+- [x] `run-cir --verify` 端到端验证
+- [x] 验证器正确拒绝占位报告（证明能识别"坏"输出）
+
+### P1-3 Direct Tool-Loop Baseline ⬜
+
+- [ ] 最朴素的 LLM Agent：Goal → LLM → Tool Call → Tool Result → LLM → ...
+- [ ] 使用相同 flagship 任务 + 相同验证器
+- [ ] 产出第一份对比数据
+
+### P1-4 Fixed Workflow Baseline ⬜
+
+- [ ] 手写确定性脚本（Python/Rust）
+- [ ] 使用相同 flagship 任务 + 相同验证器
+- [ ] 对比 ACOS vs 手写脚本
+
+### P1-5 ModelCompiler Comparative Evaluation ⬜
+
+- [ ] 启用真正的 LLM Compiler（需 API key）
+- [ ] 对比 RuleCompiler vs ModelCompiler 输出质量
+- [ ] 回答核心问题："Compiler 到底值不值？"
+
+## P1 实验方法论
+
+```text
+                     P1 Flagship Task
+                           │
+         ┌─────────────────┼─────────────────┐
+         ▼                 ▼                 ▼
+       ACOS            Direct            Fixed
+     (CIR)            Agent            Workflow
+         │                 │                 │
+         └─────────────────┼─────────────────┘
+                           ▼
+                  Same Oracle (acos-verify)
+                           ▼
+            Success / Cost / Latency /
+            Recovery / Verification
+```
+
+**核心科学问题**：Cognitive Compiler 能不能在没有为每个任务写死 Workflow 的情况下，生成一个可靠的 Cognitive Program？
+
+**实验原则**：
+- 冻结基线，无 benchmark 污染
+- 先证明组件独立工作，再对比
+- 测量语义成功（semantic success），而非仅执行成功
 
 ## 环境配置 / Configuration
 
@@ -42,76 +129,30 @@ cargo run -p acos-server
 cargo run -p acos-cli -- run task.yaml           # Claude 规划
 cargo run -p acos-cli -- run task.yaml --rules   # 规则规划
 cargo run -p acos-cli -- compile task.yaml       # 仅查看规划
+cargo run -p acos-cli -- run-cir <cir.json> [--env <env.json>] [--verify <ground_truth.yaml>]
 ```
-
-## 开发顺序 / Canonical development order
-
-1. ~~`docs/cognitive_primitive_spec.md`~~ ✅
-2. ~~`docs/task_spec.md`~~ ✅
-3. ~~`docs/cir_spec.md`~~ ✅
-4. ~~`docs/mvp_spec.md`~~ ✅
-5. ~~实现与基准测试~~ ✅
-6. ~~Web 端 + Claude 集成~~ ✅
-7. **下一步**：条件密集型任务验证、Effect System、经验回路
-
-## 已完成 / Done
-
-- [x] M0 脚手架（仓库、workspace、CI、schema）
-- [x] 7 个核心 crate 实现
-- [x] 认知编译器（RuleCompiler + ModelCompiler）
-- [x] 运行时执行引擎（图执行、工件、证据）
-- [x] 插件系统（5 个内置原语 + BuiltinRegistry）
-- [x] 验证流水线
-- [x] LLM 集成（龙猫/Anthropic，LongCat-2.0）
-- [x] Web 端（actix-web + 单页前端）
-- [x] 命令行接口
-- [x] 12 个测试全部通过
-- [x] 端到端验证（Claude 规划 → 执行 → 工件 → 验证）
-
-## P0 里程碑（控制语义 + 失败恢复 + 基准）✅
-
-**目标**：让 CIR 支持条件分支、循环映射、暂态重试，并在运行时失败时有可验证的恢复路径；以 fixture 为契约的回归套件守护这些行为。
-
-- [x] **控制语义类型**（`CirNode.control`：`condition` / `loop_spec` / `retry`，`else_children`）
-- [x] **编译期校验**（`acos_compiler::validate_cir`：条件标识符、循环 `max_iterations >= 1`、`retry.max_attempts >= 1`、不可逆原语禁止重试）
-- [x] **失败分类**（`FailureClass`：timeout / rate_limit / transient / invalid_input / …）
-- [x] **运行时控制执行**（conditional / loop_map / retry 策略）
-- [x] **恢复状态机**（`execute_with_recovery`：transactional gate + `rule` / `model` 重规划，`MAX_RECOVERY_ATTEMPTS = 3`）
-- [x] **RuleReplanner**（`OfflineFallbackRule`：暂态失败替换为本地 `read_file` 回退）
-- [x] **ModelRecoveryPlanner**（LLM 生成 `RecoverySubgraph` 补丁；需 `LONGCAT_API_KEY`）
-- [x] **基准套件**（`crates/acos-bench`：condition / loop / retry / recovery / negative 五套 fixture，CLI `acos bench`）
-- [x] **全 workspace 构建/测试绿**：移除 `actix-web` `compress` 默认特性（其经 `zstd-sys`/`brotli-sys` 拉入需 gcc 的 C 依赖），并修复 `[workspace.lints]` 的 `lint_groups_priority` 冲突 → `cargo test --workspace` 与 `cargo clippy --workspace --all-targets` 现在可运行且无非新增 warning。
-
-### P0 已知限制 / P0 known limitations
-
-- `ModelRecoveryPlanner` 需 LLM key；无 key 时相关用例在 `--require-model` 下 FAIL，否则 SKIP。
-- `acos-expr` 禁止模糊引用与 `null` 字面量；条件需用 `exists(...)` / `not_exists(...)` / 显式比较。
-- `for_each` 当前串行（无并发）；`while`/`until` 必须显式 `max_iterations >= 1`。
-- 重试仅在暂态类生效，且节点原语须 retry-safe；`ExternalIrreversible` 效果禁止重试。
-- CIR proto（`schemas/cir/cir.proto`）已补齐 `control` / `else_children` 字段，但 `primitive_id` ↔ `capability` 命名尚未统一到 Rust。
-
-## 下一步 / Next
-
-- [x] 条件密集型任务验证（branch/loop/recovery）→ P0 已完成
-- [x] 失败恢复与重规划（Test C）→ P0 已完成
-- [x] 恢复事件可视化（bench 报告新增 `Detail` 列：`replan:rule` / `retry(xN)`）→ P1 已完成
-- [ ] **P1 待办**：expr 增强、任务级保留绑定、ForEach 并发
-- [ ] Effect System（副作用声明与权限）
-- [ ] 经验回路（Phase 3，feature flag `experience-feedback`）
-- [ ] SQLite 持久化存储（Phase 2）
-- [ ] SDK 稳定化（TypeScript/Python）
-
-## 尚未标准化 / Not yet standardized
-
-- 生产级分布式传输（production-grade distributed transport）
-- WASM 组件 ABI（WASM component ABI）
-- 市场治理（marketplace governance）
-- 许可证（license）
 
 ## 已知限制 / Known limitations
 
-- LLM 规划可能存在命名不一致（已通过模糊引用匹配缓解）
-- 经验反馈回路已剥离（Phase 3）
-- SQLite 存储尚未实现（默认内存存储）
-- 无分布式多主机支持
-- 见上方「P0 已知限制」
+### P0 已知限制
+- `ModelRecoveryPlanner` 需 LLM key；无 key 时相关用例在 `--require-model` 下 FAIL，否则 SKIP
+- `acos-expr` 禁止模糊引用与 `null` 字面量
+- `for_each` 当前串行（无并发）；`while`/`until` 必须显式 `max_iterations >= 1`
+- 重试仅在暂态类生效，且节点原语须 retry-safe
+
+### P1 已知限制
+- RuleCompiler 生成的是简单线性流水线（无复杂控制流）——这是 P1-5 要验证的
+- Runtime 不发出 `artifact.stored` 事件（验证器会报告此缺失）
+- 当前 Golden CIR 仅用于 Runtime 验证，不代表 Compiler 能力
+
+## 尚未开始 / Not yet started
+
+- P1-3 Direct Tool-Loop Baseline
+- P1-4 Fixed Workflow Baseline
+- P1-5 ModelCompiler Comparative Evaluation
+- Effect System（副作用声明与权限）
+- 经验回路（Phase 3，feature flag `experience-feedback`）
+- SQLite 持久化存储（Phase 2）
+- SDK 稳定化（TypeScript/Python）
+- 生产级分布式传输
+- WASM 组件 ABI

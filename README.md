@@ -21,17 +21,18 @@ ACOS = Pluginized Cognitive Runtime
 ## 状态 / Status
 
 - 版本（Version）：0.1 架构基线（architecture baseline）
-- 阶段（Stage）：**ACOS Mini MVP 已完成，含 Web 端与 Claude 集成**
-- 主要验证目标（Primary validation target）：ACOS Mini ✅ 已验证
+- 阶段（Stage）：**ACOS Mini MVP 已完成，进入 P1 实证对比阶段**
 - 架构事实的权威来源（Canonical source of architectural truth）：`docs/`
 - 已完成：
   - ✅ M0 脚手架（仓库、workspace、CI、schema）
-  - ✅ 7 个核心 Rust crate 实现
+  - ✅ 9 个核心 Rust crate 实现
   - ✅ 认知编译器（规则优先 + Claude 模型辅助）
   - ✅ 运行时执行引擎（图执行、工件、证据、验证）
-  - ✅ 12 个测试全部通过
+  - ✅ 三层确定性验证器（Structural/Semantic/Evidence）
+  - ✅ 全部测试通过
   - ✅ **Web 端**（`http://localhost:8080`，可直观看到 agent 规划与执行）
   - ✅ **Claude API 集成**（龙猫代理，动态规划）
+  - ✅ P1-0 Flagship Task + P1-1 Golden CIR + P1-2 Semantic Verification
 
 ## 快速开始 / Quick start
 
@@ -174,7 +175,7 @@ Future Compilation（反馈优化未来编译）
 
 ## MVP / 最小可行产品
 
-ACOS Mini 已证明：自然语言目标加上结构化约束，可以通过一个小型原语集被编译为可靠的可执行图。
+ACOS Mini 已证明：**结构化任务规范可以被编译为可执行认知程序，并由 Runtime 可靠执行和验证**。开放式自然语言目标到复杂 Cognitive Program 的自动编译能力仍处于 P1 实证验证阶段。
 
 当前 5 个 MVP 原语：
 
@@ -184,7 +185,46 @@ ACOS Mini 已证明：自然语言目标加上结构化约束，可以通过一�
 - `execute_python`（执行 Python）
 - `summarize`（总结，已集成 Claude）
 
-MVP 基准测试包含条件密集型任务（condition-heavy task），而非简单线性 CSV 任务。
+P0 基准测试覆盖条件密集型任务（condition-heavy task）、循环、重试、失败恢复与负面案例。P1 正在进行 ACOS 与传统 Agent/Workflow 方法的实证对比评估。
+
+## P1 实证阶段 / P1 Empirical Phase
+
+当前重点：**验证 Cognitive Compiler 是否比传统方法具有真实优势**。
+
+```
+                    ACOS
+                      │
+        ┌─────────────┴─────────────┐
+        │                           │
+    Architecture                Runtime
+        ✅                         ✅
+        │                           │
+        └────────────┬──────────────┘
+                     │
+               P1 Evidence
+                     │
+        ┌────────────┼────────────┐
+        │            │            │
+      Golden       Oracle       Benchmark
+       CIR          ✅            ✅
+        │
+        ▼
+   Core Question
+        │
+        ▼
+   "Compiler 到底值不值？"
+```
+
+路线图：
+- ~~P0 控制语义 + 失败恢复~~ ✅
+- ~~P1-0 Flagship Task~~ ✅
+- ~~P1-1 Golden CIR / Runtime Validation~~ ✅
+- ~~P1-2 Semantic Verification~~ ✅
+- P1-3 Direct Tool-Loop Baseline
+- P1-4 Fixed Workflow Baseline
+- P1-5 ModelCompiler Comparative Evaluation
+
+详见 [项目状态 / Project Status](PROJECT_STATUS.md)。
 
 ## 文档导航 / Documentation map
 
