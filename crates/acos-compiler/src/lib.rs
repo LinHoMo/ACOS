@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
+use serde::Serialize;
 use serde_json::Value;
 
 use acos_core::error::AcosError;
@@ -232,6 +233,61 @@ pub struct ModelCompiler {
     llm: acos_llm::LongCatClient,
 }
 
+/// Full trace of a single compile operation (used by P1-5B Discovery Probe).
+///
+/// Captures every LLM request/response, intermediate errors, and timing so
+/// the compiler's behavior can be audited independently of the program's
+/// runtime result.
+#[derive(Debug, Clone, Serialize)]
+pub struct CompileTrace {
+    /// The user prompt sent on the initial attempt.
+    pub initial_prompt: String,
+    /// Raw text returned by the LLM on the initial attempt.
+    pub initial_response: String,
+    /// Error from parsing/validating the initial response, if any.
+    pub initial_error: Option<String>,
+    /// Repair attempts (empty on first-pass success).
+    pub repair_attempts: Vec<RepairTraceEntry>,
+    /// The final error if compilation failed entirely.
+    pub final_error: Option<String>,
+    /// Wall-clock timings (milliseconds).
+    pub timing: CompileTiming,
+}
+
+/// A single repair attempt's captured data.
+#[derive(Debug, Clone, Serialize)]
+pub struct RepairTraceEntry {
+    /// 1-based attempt number.
+    pub attempt: u32,
+    /// Prompt sent to the LLM (system + repair context).
+    pub prompt: String,
+    /// Raw text returned by the LLM.
+    pub response: String,
+    /// Validation error if the response was rejected, null on success.
+    pub validation_error: Option<String>,
+}
+
+/// Timing breakdown for a compile operation.
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct CompileTiming {
+    /// Latency of the initial LLM call (ms).
+    pub initial_llm_ms: u64,
+    /// Cumulative latency of all repair LLM calls (ms).
+    pub repair_llm_ms: u64,
+    /// Total wall-clock for the entire compile (ms).
+    pub total_ms: u64,
+}
+
+/// Result of a traced compile: the diagnostics-bearing result plus a full
+/// audit trace of every LLM exchange.
+#[derive(Debug, Clone)]
+pub struct TracedCompile {
+    /// The compile result (program + diagnostics).
+    pub result: Result<CompileResult, AcosError>,
+    /// Full trace of LLM exchanges and errors.
+    pub trace: CompileTrace,
+}
+
 impl ModelCompiler {
     /// Creates a model compiler backed by the given LLM client.
     pub fn new(llm: acos_llm::LongCatClient) -> Self {
@@ -326,28 +382,49 @@ impl ModelCompiler {
         Ok(program)
     }
 
-    /// Compiles with bounded repair retry.
+    /// Compiles with bounded repair retry, capturing a full trace.
     ///
-    /// On the first failure, builds a repair prompt from the specific error
-    /// and retries up to `max_repair_attempts` times. All intermediate errors
-    /// are recorded in diagnostics.
-    async fn compile_with_repair(
+    /// This is the P1-5B Discovery Probe entry point. It performs the same
+    /// compilation logic as [`compile_with_repair`] but records every LLM
+    /// exchange for later analysis.
+    pub async fn compile_traced(
         &self,
         task: &TaskSpec,
         max_repair_attempts: u32,
-    ) -> Result<CompileResult, AcosError> {
+    ) -> TracedCompile {
         let task_id = task.id;
         let user_prompt = self.build_user_prompt(task);
+        let mut trace = CompileTrace {
+            initial_prompt: user_prompt.clone(),
+            initial_response: String::new(),
+            initial_error: None,
+            repair_attempts: Vec::new(),
+            final_error: None,
+            timing: CompileTiming::default(),
+        };
+        let total_start = std::time::Instant::now();
+        let mut diagnostics: Vec<Diagnostic> = vec![];
 
         // Initial attempt
-        let raw = self
-            .llm
-            .complete(PLANNER_SYSTEM_PROMPT, &user_prompt)
-            .await?;
-        let mut diagnostics = vec![Diagnostic {
+        let init_start = std::time::Instant::now();
+        let raw = match self.llm.complete(PLANNER_SYSTEM_PROMPT, &user_prompt).await {
+            Ok(r) => r,
+            Err(e) => {
+                trace.timing.total_ms = total_start.elapsed().as_millis() as u64;
+                trace.final_error = Some(e.to_string());
+                return TracedCompile {
+                    result: Err(e),
+                    trace,
+                }
+            }
+        };
+        trace.timing.initial_llm_ms = init_start.elapsed().as_millis() as u64;
+        trace.initial_response = raw.clone();
+
+        diagnostics.push(Diagnostic {
             level: DiagnosticLevel::Note,
             message: "compile.started: initial LLM call succeeded".into(),
-        }];
+        });
 
         match self.parse_cir(&raw, task_id) {
             Ok(program) => {
@@ -360,33 +437,45 @@ impl ModelCompiler {
                         self.llm.model()
                     ),
                 });
-                return Ok(CompileResult {
-                    program,
-                    diagnostics,
-                });
+                trace.timing.total_ms = total_start.elapsed().as_millis() as u64;
+                return TracedCompile {
+                    result: Ok(CompileResult { program, diagnostics }),
+                    trace,
+                };
             }
             Err(first_error) => {
+                trace.initial_error = Some(first_error.to_string());
                 diagnostics.push(Diagnostic {
                     level: DiagnosticLevel::Warning,
                     message: format!("compile.parse_failed: {first_error}"),
                 });
 
                 let mut last_error = first_error;
+                let mut raw = raw;
 
                 // Repair loop
                 for attempt in 1..=max_repair_attempts {
-                    let repair_prompt =
-                        self.build_repair_prompt(&raw, &last_error);
+                    let repair_prompt = self.build_repair_prompt(&raw, &last_error);
 
                     diagnostics.push(Diagnostic {
                         level: DiagnosticLevel::Note,
-                        message: format!("compile.repair.started: attempt {attempt}/{max_repair_attempts}"),
+                        message: format!(
+                            "compile.repair.started: attempt {attempt}/{max_repair_attempts}"
+                        ),
                     });
 
+                    let repair_start = std::time::Instant::now();
                     match self.llm.complete(PLANNER_SYSTEM_PROMPT, &repair_prompt).await {
                         Ok(retry_raw) => {
+                            trace.timing.repair_llm_ms += repair_start.elapsed().as_millis() as u64;
                             match self.parse_cir(&retry_raw, task_id) {
                                 Ok(program) => {
+                                    trace.repair_attempts.push(RepairTraceEntry {
+                                        attempt,
+                                        prompt: repair_prompt,
+                                        response: retry_raw,
+                                        validation_error: None,
+                                    });
                                     diagnostics.push(Diagnostic {
                                         level: DiagnosticLevel::Note,
                                         message: format!(
@@ -396,14 +485,21 @@ impl ModelCompiler {
                                             program.nodes.len(),
                                         ),
                                     });
+                                    trace.timing.total_ms = total_start.elapsed().as_millis() as u64;
                                     let mut program = program;
                                     program.task_id = task_id;
-                                    return Ok(CompileResult {
-                                        program,
-                                        diagnostics,
-                                    });
+                                    return TracedCompile {
+                                        result: Ok(CompileResult { program, diagnostics }),
+                                        trace,
+                                    };
                                 }
                                 Err(e) => {
+                                    trace.repair_attempts.push(RepairTraceEntry {
+                                        attempt,
+                                        prompt: repair_prompt,
+                                        response: retry_raw.clone(),
+                                        validation_error: Some(e.to_string()),
+                                    });
                                     diagnostics.push(Diagnostic {
                                         level: DiagnosticLevel::Warning,
                                         message: format!(
@@ -411,17 +507,30 @@ impl ModelCompiler {
                                         ),
                                     });
                                     last_error = e;
+                                    raw = retry_raw;
                                 }
                             }
                         }
                         Err(llm_err) => {
+                            trace.timing.repair_llm_ms += repair_start.elapsed().as_millis() as u64;
+                            trace.repair_attempts.push(RepairTraceEntry {
+                                attempt,
+                                prompt: repair_prompt,
+                                response: String::new(),
+                                validation_error: Some(llm_err.to_string()),
+                            });
                             diagnostics.push(Diagnostic {
                                 level: DiagnosticLevel::Error,
                                 message: format!(
                                     "compile.repair.llm_error (attempt {attempt}): {llm_err}"
                                 ),
                             });
-                            return Err(llm_err);
+                            trace.timing.total_ms = total_start.elapsed().as_millis() as u64;
+                            trace.final_error = Some(llm_err.to_string());
+                            return TracedCompile {
+                                result: Err(llm_err),
+                                trace,
+                            };
                         }
                     }
                 }
@@ -435,12 +544,32 @@ impl ModelCompiler {
                     level: DiagnosticLevel::Error,
                     message: format!("compile.failed: {final_error}"),
                 });
+                trace.timing.total_ms = total_start.elapsed().as_millis() as u64;
+                trace.final_error = Some(final_error.to_string());
 
-                Err(AcosError::CompilerFailure {
-                    message: final_error.to_string(),
-                })
+                TracedCompile {
+                    result: Err(AcosError::CompilerFailure {
+                        message: final_error.to_string(),
+                    }),
+                    trace,
+                }
             }
         }
+    }
+
+    /// Compiles with bounded repair retry.
+    ///
+    /// On the first failure, builds a repair prompt from the specific error
+    /// and retries up to `max_repair_attempts` times. All intermediate errors
+    /// are recorded in diagnostics.
+    async fn compile_with_repair(
+        &self,
+        task: &TaskSpec,
+        max_repair_attempts: u32,
+    ) -> Result<CompileResult, AcosError> {
+        // Delegate to the traced variant, discard the trace.
+        let traced = self.compile_traced(task, max_repair_attempts).await;
+        traced.result
     }
 }
 

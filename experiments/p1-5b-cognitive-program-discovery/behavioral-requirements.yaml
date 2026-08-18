@@ -1,0 +1,31 @@
+# P1-5B Behavioral Requirements Matrix
+# These measure what the program DOES, not how it's structured.
+
+behavioral_requirements:
+  multi_file_processing:
+    description: "Process all 4 input CSV files"
+    required: true
+
+  data_quality_analysis:
+    description: "Detect data quality issues (missing values, duplicates, format inconsistencies)"
+    required: true
+
+  anomaly_detection:
+    description: "Identify anomalies (negative quantities, extreme revenue values)"
+    required: true
+
+  repair_or_recovery:
+    description: "Execute repair or recovery operations"
+    required: true
+
+  structured_report:
+    description: "Generate required report sections (data_quality, recovery_log, quarterly_summary, anomalies, revenue_by_category)"
+    required: true
+
+  ground_truth_accuracy:
+    description: "Revenue statistics match Ground Truth within 1% tolerance"
+    required: true
+
+  evidence:
+    description: "Provide auditable evidence trail (event log covers all produced outputs)"
+    required: true

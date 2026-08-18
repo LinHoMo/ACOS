@@ -11,6 +11,7 @@ description = "ACOS cognitive compiler: rule-first planner with model-assisted g
 acos-core = { path = "../acos-core" }
 acos-llm = { path = "../acos-llm" }
 async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 
