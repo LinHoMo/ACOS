@@ -96,14 +96,24 @@
 
 **已知限制**：首次模型响应为空（EOF）概率较高，属于模型/API 稳定性问题，不影响编译器机制正确性。
 
-### P1-5B Cognitive Program Discovery ⬜
+### P1-5B Cognitive Program Discovery 🔬 IN PROGRESS
 
 > **目标**：验证命题 B——模型能否自动发现合理的 Cognitive Program 结构。
 
-- [ ] 等 P1-5A 完成后启动
-- [ ] 结构评分体系（不要求与 Golden CIR DAG 完全相同，检查行为覆盖 / 依赖关系 / 任务约束 / Ground Truth）
-- [ ] ACOS(ModelCompiler) × 5 对比 RuleCompiler × 5
-- [ ] 回答核心问题："Compiler 能自动发现程序结构吗？"
+**设计原则**：
+- 不要求复制 Golden CIR（语义等价的自由结构均可接受）
+- 不给模型工作流提示（只有 Task Spec + Capability Registry + CIR Schema）
+- 判断标准是 Task Adequacy（通过 Ground Truth），不是 Structural Equality
+
+**三层正确性模型**：L1 Structural Validity → L2 Executability → L3 Task Adequacy
+
+- [x] 实验设计文档（`experiments/p1-5b-cognitive-program-discovery/design.md`）
+- [x] Behavioral Requirements Matrix（`behavioral-requirements.yaml`，7 项行为要求）
+- [x] 实现 `ModelCompiler::compile_traced()`（捕获完整 LLM trace + 时序）
+- [x] 实现 Discovery Probe 二进制（`cargo run -p acos-cli --bin p1-5b-probe`）
+- [ ] 运行 Discovery Probe（3 runs, LongCat-2.0）
+- [ ] 分析结果，归档报告
+- [ ] 根据结果决定是否需要调整 system prompt
 
 ## P1 实验方法论
 
@@ -186,8 +196,8 @@ cargo run -p acos-cli -- run-cir <cir.json> [--env <env.json>] [--verify <ground
 - 当前 Golden CIR 仅用于 Runtime 验证，不代表 Compiler 能力
 - Baseline 端到端测试需 `LONGCAT_API_KEY`（无 key 时跳过）
 - Baseline 当前使用 flat conversation（非 true multi-turn API），v0.2 足够但长期可改进
-- **ModelCompiler 当前不可用**（LLM 返回空/无效 JSON，Compiler 前端缺乏错误修复机制——P1-5A 正在解决）
-- 命题 B 尚未验证（需等 P1-5A 完成后才能启动 P1-5B）
+- **ModelCompiler 前端已修复**（P1-5A 完成，FROZEN/PASS）
+- P1-5B Discovery Probe 代码就绪，待运行真实 API 验证命题 B
 
 ## 第一轮实验结果（P1-R1，已冻结）
 
@@ -207,11 +217,13 @@ ModelCompiler:      0/1 (编译器失败，LLM 返回空/无效输出)
 
 ### 当前优先级：P1-5B Cognitive Program Discovery
 
-- [ ] 设计 Compiler Discovery Probe（旗舰任务，无 Workflow 提示）
-- [ ] 定义 Behavioral Requirements（非结构要求）
-- [ ] 实现 4 个核心指标：Compile Success / Program Success / Verified Success / Program Adequacy
-- [ ] 额外记录 Compiler Repair Tax（repair_count / latency / token_cost）
-- [ ] 跑 ACOS(ModelCompiler) × 5 对比 RuleCompiler × 5
+- [x] 设计 Compiler Discovery Probe（旗舰任务，无 Workflow 提示）
+- [x] 定义 Behavioral Requirements（非结构要求）
+- [x] 实现 compile_traced（Compile Success + Repair Tax + 完整 trace）
+- [x] 实现 Discovery Probe 二进制（3 runs + 执行 + 验证）
+- [ ] 运行 Discovery Probe（`cargo run -p acos-cli --bin p1-5b-probe`）
+- [ ] 分析结果，归档 `probe-results/`
+- [ ] 决定下一步（正式 5-run 实验 or prompt 调整）
 
 ### 后续计划
 
