@@ -1,0 +1,120 @@
+{
+  "behavioral_analysis": {
+    "binding_matched": 0,
+    "binding_total": 4,
+    "checks": [
+      {
+        "detail": "0/4 declared paths referenced",
+        "name": "BR-1 Multi-File Processing",
+        "verdict": "FAIL"
+      },
+      {
+        "detail": "only read/write",
+        "name": "BR-2 Data Quality Analysis",
+        "verdict": "FAIL"
+      },
+      {
+        "detail": "conditions=0, python=false",
+        "name": "BR-3 Anomaly Detection/Repair",
+        "verdict": "FAIL"
+      },
+      {
+        "detail": "no output",
+        "name": "BR-4 Structured Report",
+        "verdict": "FAIL"
+      },
+      {
+        "detail": "1 nodes, 0 primitives",
+        "name": "BR-5 Evidence/Audit Trail",
+        "verdict": "FAIL"
+      },
+      {
+        "detail": "0 loops, 0 conds, 0 retries",
+        "name": "BR-6 Control Flow Complexity",
+        "verdict": "FAIL"
+      },
+      {
+        "detail": "all paths declared",
+        "name": "BR-7 No Hallucinated Resources",
+        "verdict": "PASS"
+      }
+    ],
+    "condition_count": 0,
+    "loop_count": 0,
+    "node_count": 1,
+    "pass_count": 1,
+    "primitive_count": 0,
+    "retry_count": 0
+  },
+  "execution": {
+    "artifact_count": 0,
+    "ok": true,
+    "verification": {
+      "ok": true,
+      "passed": false
+    }
+  },
+  "input": {
+    "prompt_sent": "Compile the following ACOS task into a CIR execution graph.\n\n# Task Goal\n\nAnalyze all quarterly sales CSV files in the dataset directory. For each file: detect data-quality issues (schema drift, type errors, missing values, duplicates, outliers); repair recoverable issues; revalidate repaired inputs; compute quarterly statistics; merge results; run a quality review; and generate a consolidated Markdown report with an evidence log.\n\n# Input Bindings (AUTHORITATIVE — use these exact paths)\n\nThe following input files are declared by the task and MUST be used:\n\n1. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv\", format=\"csv\"\n2. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv\", format=\"csv\"\n3. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv\", format=\"csv\"\n4. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv\", format=\"csv\"\n\n# Required Outputs\n\nThe CIR MUST produce:\n\n- type=\"Report\", format=\"markdown\"\n\n# Constraints\n\n\n# Optimization: primary=\"reliability\", secondary=\"cost\"\n\n# Approval: externalSideEffects=\"required\"\n\n# Full TaskSpec (reference JSON)\n\n```json\n{\n  \"apiVersion\": \"acos.io/v1\",\n  \"id\": \"fd3f5a5e-1b0a-4b1e-8c7a-9e2d4f6a8b01\",\n  \"goal\": \"Analyze all quarterly sales CSV files in the dataset directory. For each file: detect data-quality issues (schema drift, type errors, missing values, duplicates, outliers); repair recoverable issues; revalidate repaired inputs; compute quarterly statistics; merge results; run a quality review; and generate a consolidated Markdown report with an evidence log.\",\n  \"inputs\": [\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv\",\n      \"format\": \"csv\"\n    },\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv\",\n      \"format\": \"csv\"\n    },\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv\",\n      \"format\": \"csv\"\n    },\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv\",\n      \"format\": \"csv\"\n    }\n  ],\n  \"outputs\": [\n    {\n      \"type\": \"Report\",\n      \"format\": \"markdown\"\n    }\n  ],\n  \"constraints\": {\n    \"timeoutSeconds\": null,\n    \"maxCost\": null,\n    \"allowedNetwork\": null\n  },\n  \"optimization\": {\n    \"primary\": \"reliability\",\n    \"secondary\": \"cost\"\n  },\n  \"approval\": {\n    \"externalSideEffects\": \"required\"\n  }\n}\n```\n",
+    "task_spec_path": "tests/benchmarks/p1/flagship_csv_quality/acos_task.yaml"
+  },
+  "output": {
+    "final_cir": {
+      "effects": [],
+      "entry": [
+        "root"
+      ],
+      "id": "6ead8c6d-a2f1-459b-a55d-c2e16f1732bf",
+      "nodes": [
+        {
+          "capability": null,
+          "children": [],
+          "elseChildren": [],
+          "inputs": {},
+          "kind": "sequence",
+          "nodeId": "root",
+          "output": null
+        }
+      ],
+      "taskId": "fd3f5a5e-1b0a-4b1e-8c7a-9e2d4f6a8b01"
+    },
+    "initial_parse_error": "JSON syntax error: EOF while parsing a value at line 1 column 0",
+    "initial_raw_response": "",
+    "repair_count": 1,
+    "repair_traces": [
+      {
+        "attempt": 1,
+        "prompt": "Your previous output failed CIR validation.\n\nError type: CompilerError\nDetails: JSON syntax error: EOF while parsing a value at line 1 column 0\n\nOriginal output excerpt:\n```\n\n```\n\nPlease analyze the error and return a corrected CIR JSON.\nRespond with ONLY the corrected JSON, no commentary.",
+        "raw_response": "{\n  \"id\": \"00000000-0000-0000-0000-000000000000\",\n  \"taskId\": \"00000000-0000-0000-0000-000000000000\",\n  \"entry\": [\"root\"],\n  \"nodes\": [\n    {\n      \"kind\": \"sequence\",\n      \"nodeId\": \"root\",\n      \"capability\": null,\n      \"output\": null,\n      \"children\": [],\n      \"inputs\": {}\n    }\n  ],\n  \"effects\": []\n}",
+        "validation_error": null
+      }
+    ]
+  },
+  "program_metrics": {
+    "capability_types": [],
+    "condition_count": 0,
+    "control_node_count": 0,
+    "loop_count": 0,
+    "node_count": 1,
+    "primitive_count": 0,
+    "retry_count": 0
+  },
+  "repair_tax": {
+    "first_pass_success": false,
+    "repair_attempts_used": 1,
+    "repair_latency_ms": 73597
+  },
+  "run": {
+    "compile_success": true,
+    "final_error": null,
+    "model": "LongCat-2.0",
+    "run_index": 1,
+    "timestamp": "2026-09-04T07:04:33Z"
+  },
+  "timing": {
+    "initial_llm_ms": 97019,
+    "repair_llm_ms": 73597,
+    "total_compile_ms": 170617,
+    "total_wall_ms": 170619
+  }
+}

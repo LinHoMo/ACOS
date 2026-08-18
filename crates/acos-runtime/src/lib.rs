@@ -675,6 +675,7 @@ impl RuntimeImpl {
                         },
                     )
                 })?;
+                let mut collected: Vec<serde_json::Value> = Vec::new();
                 loop {
                     if let Some(max) = spec.max_iterations {
                         if iteration >= max {
@@ -724,8 +725,10 @@ impl RuntimeImpl {
                         Box::pin(self.run_node(child, run_id, env, artifacts, evidence, node_map))
                             .await?;
                     }
+                    self.capture_loop_output(node, node_map, env, &mut collected).await;
                     self.complete_iteration(run_id, &node.node_id, iteration).await?;
                 }
+                self.bind_loop_output(node, env, collected).await;
                 Ok(())
             }
             LoopKind::ForEach => {
@@ -757,6 +760,7 @@ impl RuntimeImpl {
                     .map(|tv| tv.payload.as_array().cloned().unwrap_or_default())
                     .unwrap_or_default();
                 let max = spec.max_iterations.map(|m| m as usize);
+                let mut collected: Vec<serde_json::Value> = Vec::new();
                 for (i, item) in items.iter().enumerate() {
                     if let Some(max) = max {
                         if i >= max {
@@ -786,12 +790,54 @@ impl RuntimeImpl {
                         Box::pin(self.run_node(child, run_id, env, artifacts, evidence, node_map))
                             .await?;
                     }
+                    self.capture_loop_output(node, node_map, env, &mut collected).await;
                     self.complete_iteration(run_id, &node.node_id, (i + 1) as u32)
                         .await?;
                 }
+                self.bind_loop_output(node, env, collected).await;
                 Ok(())
             }
         }
+    }
+
+    /// Captures the last child's declared output value into `collected`.
+    ///
+    /// Semantics: a `loop_map` node's `output` is an array of the per-iteration
+    /// values produced by its last child. This is how a loop aggregates
+    /// per-item results for downstream nodes (e.g. `"${all_results}"`).
+    async fn capture_loop_output(
+        &self,
+        node: &CirNode,
+        node_map: &HashMap<String, CirNode>,
+        env: &Arc<Mutex<HashMap<String, TypedValue>>>,
+        collected: &mut Vec<serde_json::Value>,
+    ) {
+        let Some(child_id) = node.children.last() else { return };
+        let Some(child) = node_map.get(child_id) else { return };
+        let Some(out_name) = child.output.clone() else { return };
+        let guard = env.lock().await;
+        if let Some(tv) = guard.get(&out_name) {
+            collected.push(tv.payload.clone());
+        }
+    }
+
+    /// Binds the loop node's declared `output` to the collected per-iteration
+    /// values (empty array if no iterations completed).
+    async fn bind_loop_output(
+        &self,
+        node: &CirNode,
+        env: &Arc<Mutex<HashMap<String, TypedValue>>>,
+        collected: Vec<serde_json::Value>,
+    ) {
+        let Some(out_name) = node.output.clone() else { return };
+        let mut guard = env.lock().await;
+        guard.insert(
+            out_name,
+            TypedValue {
+                value_type: ValueType::List,
+                payload: serde_json::Value::Array(collected),
+            },
+        );
     }
 
     /// Emits an `iteration.started` event.
@@ -1270,6 +1316,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn for_each_loop_binds_aggregated_output() {
+        let mut body = primitive_node("body", "echo_item", Some("file_result"));
+        body.inputs.insert("item".into(), serde_json::Value::String("${item}".into()));
+        let loop_node = CirNode {
+            kind: CirNodeKind::LoopMap,
+            node_id: "loop".into(),
+            capability: None,
+            output: Some("all_results".into()),
+            children: vec!["body".into()],
+            else_children: vec![],
+            inputs: HashMap::new(),
+            control: Some(ControlSpec {
+                condition: None,
+                loop_spec: Some(LoopSpec {
+                    kind: LoopKind::ForEach,
+                    condition: None,
+                    max_iterations: None,
+                    input: Some("${items}".into()),
+                    item_var: Some("item".into()),
+                }),
+                retry: None,
+            }),
+        };
+        let mut consumer = primitive_node("consumer", "verify_output", Some("consumed"));
+        consumer.inputs.insert("item".into(), serde_json::Value::String("${all_results}".into()));
+        let nodes = vec![
+            CirNode {
+                kind: CirNodeKind::Sequence,
+                node_id: "root".into(),
+                capability: None,
+                output: None,
+                children: vec!["init".into(), "loop".into(), "consumer".into()],
+                else_children: vec![],
+                inputs: HashMap::new(),
+                control: None,
+            },
+            {
+                let mut init = primitive_node("init", "echo_list", Some("items"));
+                init.inputs.insert(
+                    "items".into(),
+                    serde_json::json!(["a", "b", "c"]),
+                );
+                init
+            },
+            loop_node,
+            body,
+            consumer,
+        ];
+
+        let store: Arc<dyn EventStore + Send + Sync> = Arc::new(InMemoryStore::new());
+        let astore: Arc<dyn ArtifactStore + Send + Sync> = Arc::new(InMemoryStore::new());
+        let runtime = RuntimeImpl::with_registry(store.clone(), astore, EchoRegistry { inner: acos_plugin::BuiltinRegistry::new() });
+        let report = runtime.execute(program_from(nodes)).await.unwrap();
+        assert_eq!(
+            report.status,
+            RunStatus::Completed,
+            "loop output aggregation must feed downstream consumers"
+        );
+    }
+
+    #[tokio::test]
     async fn while_loop_hits_limit_and_fails() {
         let nodes = vec![
             CirNode {
@@ -1401,6 +1508,117 @@ mod tests {
     #[derive(Debug)]
     struct FlakyRegistry {
         inner: acos_plugin::BuiltinRegistry,
+    }
+
+    // ── Loop output aggregation test primitives ──────────────────────────────
+
+    #[derive(Debug)]
+    struct EchoItemPrimitive;
+
+    #[async_trait]
+    impl Primitive for EchoItemPrimitive {
+        fn capability(&self) -> CapabilityDesc {
+            CapabilityDesc {
+                id: "echo_item".into(),
+                name: "Echo Item".into(),
+                input_type: "EchoRequest".into(),
+                output_type: "EchoResult".into(),
+            }
+        }
+        fn effects(&self) -> Vec<EffectDecl> {
+            vec![]
+        }
+        async fn invoke(&self, input: TypedValue) -> Result<TypedValue, AcosError> {
+            let item = input.payload.get("item").cloned().unwrap_or(serde_json::Value::Null);
+            Ok(TypedValue { value_type: ValueType::Scalar, payload: item })
+        }
+        fn has_compensation(&self, _e: &EffectDecl) -> bool { false }
+        async fn compensate(&self, _e: &EffectDecl, _i: TypedValue) -> Result<(), AcosError> { Ok(()) }
+    }
+
+    #[derive(Debug)]
+    struct EchoListPrimitive;
+
+    #[async_trait]
+    impl Primitive for EchoListPrimitive {
+        fn capability(&self) -> CapabilityDesc {
+            CapabilityDesc {
+                id: "echo_list".into(),
+                name: "Echo List".into(),
+                input_type: "EchoRequest".into(),
+                output_type: "EchoResult".into(),
+            }
+        }
+        fn effects(&self) -> Vec<EffectDecl> {
+            vec![]
+        }
+        async fn invoke(&self, input: TypedValue) -> Result<TypedValue, AcosError> {
+            let items = input.payload.get("items").cloned().unwrap_or(serde_json::Value::Null);
+            Ok(TypedValue {
+                value_type: if items.is_array() { ValueType::List } else { ValueType::Scalar },
+                payload: items,
+            })
+        }
+        fn has_compensation(&self, _e: &EffectDecl) -> bool { false }
+        async fn compensate(&self, _e: &EffectDecl, _i: TypedValue) -> Result<(), AcosError> { Ok(()) }
+    }
+
+    #[derive(Debug)]
+    struct VerifyOutputPrimitive;
+
+    #[async_trait]
+    impl Primitive for VerifyOutputPrimitive {
+        fn capability(&self) -> CapabilityDesc {
+            CapabilityDesc {
+                id: "verify_output".into(),
+                name: "Verify Output".into(),
+                input_type: "EchoRequest".into(),
+                output_type: "EchoResult".into(),
+            }
+        }
+        fn effects(&self) -> Vec<EffectDecl> {
+            vec![]
+        }
+        async fn invoke(&self, input: TypedValue) -> Result<TypedValue, AcosError> {
+            let item = input.payload.get("item").cloned().unwrap_or_default();
+            if item == serde_json::json!(["a", "b", "c"]) {
+                Ok(TypedValue { value_type: ValueType::List, payload: item })
+            } else {
+                Err(AcosError::PrimitiveFailure {
+                    message: format!("expected aggregated [a,b,c], got: {item}"),
+                    primitive_id: Some("verify_output".into()),
+                    class: FailureClass::Unknown,
+                })
+            }
+        }
+        fn has_compensation(&self, _e: &EffectDecl) -> bool { false }
+        async fn compensate(&self, _e: &EffectDecl, _i: TypedValue) -> Result<(), AcosError> { Ok(()) }
+    }
+
+    #[derive(Debug)]
+    struct EchoRegistry {
+        inner: acos_plugin::BuiltinRegistry,
+    }
+
+    #[async_trait]
+    impl PluginRegistry for EchoRegistry {
+        fn list(&self) -> Vec<CapabilityDesc> {
+            self.inner.list()
+        }
+        async fn resolve(&self, capability_id: &str) -> Result<Box<dyn Primitive>, AcosError> {
+            match capability_id {
+                "echo_item" => Ok(Box::new(EchoItemPrimitive)),
+                "echo_list" => Ok(Box::new(EchoListPrimitive)),
+                "verify_output" => Ok(Box::new(VerifyOutputPrimitive)),
+                _ => self.inner.resolve(capability_id).await,
+            }
+        }
+        async fn load(&self, m: PrimitiveManifest) -> Result<PrimitiveId, AcosError> {
+            self.inner.load(m).await
+        }
+        async fn unload(&self, id: PrimitiveId) -> Result<(), AcosError> {
+            self.inner.unload(id).await
+        }
     }
 
     impl FlakyRegistry {

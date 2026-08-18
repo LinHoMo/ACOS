@@ -1,0 +1,213 @@
+{
+  "behavioral_analysis": {
+    "binding_matched": 0,
+    "binding_total": 4,
+    "checks": [
+      {
+        "detail": "0/4 declared paths referenced",
+        "name": "BR-1 Multi-File Processing",
+        "verdict": "FAIL"
+      },
+      {
+        "detail": "analysis caps: {\"write_file\", \"execute_python\"}",
+        "name": "BR-2 Data Quality Analysis",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "conditions=0, python=true",
+        "name": "BR-3 Anomaly Detection/Repair",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "write_file present",
+        "name": "BR-4 Structured Report",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "6 nodes, 4 primitives",
+        "name": "BR-5 Evidence/Audit Trail",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "1 loops, 0 conds, 1 retries",
+        "name": "BR-6 Control Flow Complexity",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "all paths declared",
+        "name": "BR-7 No Hallucinated Resources",
+        "verdict": "PASS"
+      }
+    ],
+    "condition_count": 0,
+    "loop_count": 1,
+    "node_count": 6,
+    "pass_count": 6,
+    "primitive_count": 4,
+    "retry_count": 1
+  },
+  "execution": {
+    "artifact_count": 0,
+    "artifact_preview": null,
+    "ok": true,
+    "verification": {
+      "ok": true,
+      "passed": false
+    }
+  },
+  "input": {
+    "prompt_sent": "Compile the following ACOS task into a CIR execution graph.\n\n# Task Goal\n\nAnalyze all quarterly sales CSV files in the dataset directory. For each file: detect data-quality issues (schema drift, type errors, missing values, duplicates, outliers); repair recoverable issues; revalidate repaired inputs; compute quarterly statistics; merge results; run a quality review; and generate a consolidated Markdown report with an evidence log.\n\n# Input Bindings (AUTHORITATIVE — use these exact paths)\n\nThe following input files are declared by the task and MUST be used:\n\n1. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv\", format=\"csv\"\n2. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv\", format=\"csv\"\n3. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv\", format=\"csv\"\n4. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv\", format=\"csv\"\n\n# Required Outputs\n\nThe CIR MUST produce:\n\n- type=\"Report\", format=\"markdown\"\n\n# Constraints\n\n\n# Optimization: primary=\"reliability\", secondary=\"cost\"\n\n# Approval: externalSideEffects=\"required\"\n\n# Full TaskSpec (reference JSON)\n\n```json\n{\n  \"apiVersion\": \"acos.io/v1\",\n  \"id\": \"fd3f5a5e-1b0a-4b1e-8c7a-9e2d4f6a8b01\",\n  \"goal\": \"Analyze all quarterly sales CSV files in the dataset directory. For each file: detect data-quality issues (schema drift, type errors, missing values, duplicates, outliers); repair recoverable issues; revalidate repaired inputs; compute quarterly statistics; merge results; run a quality review; and generate a consolidated Markdown report with an evidence log.\",\n  \"inputs\": [\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv\",\n      \"format\": \"csv\"\n    },\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv\",\n      \"format\": \"csv\"\n    },\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv\",\n      \"format\": \"csv\"\n    },\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv\",\n      \"format\": \"csv\"\n    }\n  ],\n  \"outputs\": [\n    {\n      \"type\": \"Report\",\n      \"format\": \"markdown\"\n    }\n  ],\n  \"constraints\": {\n    \"timeoutSeconds\": null,\n    \"maxCost\": null,\n    \"allowedNetwork\": null\n  },\n  \"optimization\": {\n    \"primary\": \"reliability\",\n    \"secondary\": \"cost\"\n  },\n  \"approval\": {\n    \"externalSideEffects\": \"required\"\n  }\n}\n```\n",
+    "task_spec_path": "tests/benchmarks/p1/flagship_csv_quality/acos_task.yaml"
+  },
+  "output": {
+    "final_cir": {
+      "effects": [
+        {
+          "description": "read quarterly sales CSV files from dataset directory",
+          "kind": "fs_read",
+          "reversible": true
+        },
+        {
+          "description": "write consolidated Markdown quality report",
+          "kind": "fs_write",
+          "reversible": true
+        },
+        {
+          "description": "execute Python for data analysis, repair, and report generation",
+          "kind": "process_spawn",
+          "reversible": true
+        }
+      ],
+      "entry": [
+        "root"
+      ],
+      "id": "c63fee58-1532-4229-a494-c3488e06d943",
+      "nodes": [
+        {
+          "capability": null,
+          "children": [
+            "analyze_loop",
+            "merge_and_report"
+          ],
+          "elseChildren": [],
+          "inputs": {},
+          "kind": "sequence",
+          "nodeId": "root",
+          "output": null
+        },
+        {
+          "capability": null,
+          "children": [
+            "analyze_file"
+          ],
+          "control": {
+            "loopSpec": {
+              "condition": null,
+              "input": "${file_paths}",
+              "itemVar": "file_path",
+              "kind": "for_each",
+              "maxIterations": null
+            }
+          },
+          "elseChildren": [],
+          "inputs": {},
+          "kind": "loop_map",
+          "nodeId": "analyze_loop",
+          "output": "all_results"
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "paths = [\n  'tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv',\n  'tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv',\n  'tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv',\n  'tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv'\n]\nprint(paths)"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "define_paths",
+          "output": "file_paths"
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "control": {
+            "retry": {
+              "backoffMs": 200,
+              "maxAttempts": 3,
+              "retryOn": [
+                "timeout",
+                "rate_limit",
+                "transient_network_error"
+              ],
+              "strategy": "fixed"
+            }
+          },
+          "elseChildren": [],
+          "inputs": {
+            "code": "import pandas as pd\nimport numpy as np\nimport json\nimport hashlib\n\nfile_path = '${file_path}'\nevidence = []\n\n# Read CSV\ntry:\n    df = pd.read_csv(file_path)\n    evidence.append(f'[READ] Successfully read {file_path}: {len(df)} rows, {len(df.columns)} columns')\nexcept Exception as e:\n    evidence.append(f'[ERROR] Failed to read {file_path}: {str(e)}')\n    result = {'file': file_path, 'error': str(e), 'evidence': evidence}\n    print(json.dumps(result))\n    return\n\n# 1. Schema drift detection\nexpected_cols = ['date', 'product_id', 'quantity', 'price', 'revenue']\nactual_cols = list(df.columns)\nschema_drift = actual_cols != expected_cols\nif schema_drift:\n    evidence.append(f'[SCHEMA_DRIFT] Expected {expected_cols}, got {actual_cols}')\n    col_map = {}\n    for exp in expected_cols:\n        matches = [c for c in actual_cols if exp.lower() in c.lower() or c.lower() in exp.lower()]\n        if matches:\n            col_map[matches[0]] = exp\n    if col_map:\n        df = df.rename(columns=col_map)\n        evidence.append(f'[REPAIR] Renamed columns: {col_map}')\n    for col in expected_cols:\n        if col not in df.columns:\n            df[col] = np.nan\n            evidence.append(f'[REPAIR] Added missing column: {col}')\nelse:\n    evidence.append(f'[SCHEMA_OK] Columns match expected schema')\n\n# 2. Type errors detection and repair\ntype_issues = 0\nfor col in ['quantity', 'price', 'revenue']:\n    if col in df.columns:\n        original_dtype = df[col].dtype\n        if not np.issubdtype(original_dtype, np.number):\n            df[col] = pd.to_numeric(df[col], errors='coerce')\n            new_nulls = df[col].isna().sum()\n            evidence.append(f'[TYPE_ERROR] Column {col} was non-numeric ({original_dtype}), coerced to numeric. New NaNs: {new_nulls}')\n            type_issues += 1\n\nif 'date' in df.columns:\n    try:\n        df['date'] = pd.to_datetime(df['date'], errors='coerce')\n        date_nulls = df['date'].isna().sum()\n        if date_nulls > 0:\n            evidence.append(f'[TYPE_ERROR] {date_nulls} date values could not be parsed')\n            type_issues += 1\n    except Exception as e:\n        evidence.append(f'[TYPE_ERROR] Date parsing failed: {e}')\n\n# 3. Missing values detection and repair\nmissing_report = {}\nfor col in expected_cols:\n    if col in df.columns:\n        missing_count = df[col].isna().sum()\n        if missing_count > 0:\n            missing_report[col] = int(missing_count)\n            if col in ['quantity', 'price', 'revenue']:\n                median_val = df[col].median()\n                df[col] = df[col].fillna(median_val)\n                evidence.append(f'[MISSING_REPAIR] {col}: filled {missing_count} missing with median={median_val}')\n            elif col == 'product_id':\n                df[col] = df[col].fillna('UNKNOWN')\n                evidence.append(f'[MISSING_REPAIR] {col}: filled {missing_count} missing with UNKNOWN')\n\nif not missing_report:\n    evidence.append('[MISSING_OK] No missing values detected')\n\n# 4. Duplicate detection and repair\nduplicates = df.duplicated().sum()\nif duplicates > 0:\n    df = df.drop_duplicates().reset_index(drop=True)\n    evidence.append(f'[DUPLICATE_REPAIR] Removed {duplicates} duplicate rows')\nelse:\n    evidence.append('[DUPLICATE_OK] No duplicates found')\n\n# 5. Outlier detection and repair (IQR method)\noutlier_report = {}\nfor col in ['quantity', 'price', 'revenue']:\n    if col in df.columns and df[col].notna().sum() > 0:\n        Q1 = df[col].quantile(0.25)\n        Q3 = df[col].quantile(0.75)\n        IQR = Q3 - Q1\n        lower = Q1 - 1.5 * IQR\n        upper = Q3 + 1.5 * IQR\n        outliers = ((df[col] < lower) | (df[col] > upper)) & df[col].notna()\n        outlier_count = outliers.sum()\n        if outlier_count > 0:\n            outlier_report[col] = int(outlier_count)\n            df.loc[df[col] < lower, col] = lower\n            df.loc[df[col] > upper, col] = upper\n            evidence.append(f'[OUTLIER_REPAIR] {col}: clipped {outlier_count} outliers to [{lower:.2f}, {upper:.2f}]')\n\nif not outlier_report:\n    evidence.append('[OUTLIER_OK] No outliers detected')\n\n# 6. Revalidation\nrevalidation = []\nfor col in expected_cols:\n    if col in df.columns:\n        remaining_nulls = df[col].isna().sum()\n        if remaining_nulls > 0:\n            revalidation.append(f'{col}: {remaining_nulls} nulls remain')\npost_dedup_dups = df.duplicated().sum()\nif post_dedup_dups > 0:\n    revalidation.append(f'{post_dedup_dups} duplicates remain')\nif revalidation:\n    evidence.append(f'[REVALIDATION] Issues remain: {revalidation}')\nelse:\n    evidence.append('[REVALIDATION_OK] All repairs validated successfully')\n\n# 7. Compute quarterly statistics\nstats = {\n    'file': file_path,\n    'row_count': len(df),\n    'columns': list(df.columns),\n    'schema_detected': schema_drift,\n    'type_issues_found': type_issues,\n    'missing_values': missing_report,\n    'duplicates_removed': int(duplicates),\n    'outliers_clipped': outlier_report,\n    'total_revenue': float(df['revenue'].sum()) if 'revenue' in df.columns else None,\n    'avg_quantity': float(df['quantity'].mean()) if 'quantity' in df.columns else None,\n    'avg_price': float(df['price'].mean()) if 'price' in df.columns else None,\n    'date_range': {\n        'min': str(df['date'].min()) if 'date' in df.columns else None,\n        'max': str(df['date'].max()) if 'date' in df.columns else None\n    }\n}\n\nresult = {\n    'file': file_path,\n    'statistics': stats,\n    'evidence': evidence,\n    'repair_status': 'fully_repaired' if not revalidation else 'partially_repaired'\n}\nprint(json.dumps(result, default=str))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "analyze_file",
+          "output": "file_result"
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import json\nfrom datetime import datetime\n\n# Collect results from all file analyses\nresults_json = '''${all_results}'''\nall_results = json.loads(results_json)\n\n# Merge statistics\nmerged_stats = {\n    'total_files_processed': len(all_results),\n    'quarters': {},\n    'total_revenue_all': 0,\n    'total_records': 0,\n    'files_with_issues': 0,\n    'files_fully_repaired': 0,\n    'files_partially_repaired': 0\n}\n\nall_evidence = []\n\nfor result in all_results:\n    file_path = result['file']\n    quarter = file_path.split('_')[-1].replace('.csv', '').upper()\n    stats = result['statistics']\n    evidence = result['evidence']\n    repair_status = result['repair_status']\n    \n    merged_stats['quarters'][quarter] = stats\n    merged_stats['total_records'] += stats['row_count']\n    \n    if stats.get('total_revenue'):\n        merged_stats['total_revenue_all'] += stats['total_revenue']\n    \n    if repair_status == 'fully_repaired':\n        merged_stats['files_fully_repaired'] += 1\n    else:\n        merged_stats['files_partially_repaired'] += 1\n    \n    if stats.get('schema_detected') or stats.get('type_issues_found', 0) > 0 or stats.get('missing_values') or stats.get('duplicates_removed', 0) > 0 or stats.get('outliers_clipped'):\n        merged_stats['files_with_issues'] += 1\n    \n    all_evidence.append({\n        'file': file_path,\n        'quarter': quarter,\n        'evidence': evidence\n    })\n\n# Quality review\nquality_review = {\n    'overall_status': 'PASS' if merged_stats['files_partially_repaired'] == 0 else 'PARTIAL_PASS',\n    'summary': f\"Processed {merged_stats['total_files_processed']} files with {merged_stats['total_records']} total records.\",\n    'issues_found_in': merged_stats['files_with_issues'],\n    'fully_repaired': merged_stats['files_fully_repaired'],\n    'partially_repaired': merged_stats['files_partially_repaired'],\n    'recommendations': []\n}\n\nif merged_stats['files_partially_repaired'] > 0:\n    quality_review['recommendations'].append('Some files had remaining issues after repair. Manual review recommended.')\nif merged_stats['files_with_issues'] == 0:\n    quality_review['recommendations'].append('All files passed quality checks. No action needed.')\n\n# Generate Markdown report\nreport_lines = [\n    '# Quarterly Sales Data Quality Report',\n    '',\n    f'**Generated:** {datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")}',\n    f'**Files Analyzed:** {merged_stats[\"total_files_processed\"]}',\n    '',\n    '---',\n    '',\n    '## Executive Summary',\n    '',\n    f'- **Total Records Processed:** {merged_stats[\"total_records\"]}',\n    f'- **Total Revenue (All Quarters):** ${merged_stats[\"total_revenue_all\"]:,.2f}',\n    f'- **Files with Issues:** {merged_stats[\"files_with_issues\"]}/{merged_stats[\"total_files_processed\"]}',\n    f'- **Fully Repaired:** {merged_stats[\"files_fully_repaired\"]}',\n    f'- **Partially Repaired:** {merged_stats[\"files_partially_repaired\"]}',\n    '',\n    '---',\n    '',\n    '## Quality Review',\n    '',\n    f'**Overall Status:** {quality_review[\"overall_status\"]}',\n    '',\n    f'{quality_review[\"summary\"]}',\n    ''\n]\n\nif quality_review['recommendations']:\n    report_lines.append('### Recommendations')\n    report_lines.append('')\n    for rec in quality_review['recommendations']:\n        report_lines.append(f'- {rec}')\n    report_lines.append('')\n\nreport_lines.extend([\n    '---',\n    '',\n    '## Quarterly Statistics',\n    ''\n])\n\nfor quarter, stats in sorted(merged_stats['quarters'].items()):\n    report_lines.extend([\n        f'### {quarter}',\n        '',\n        f'- **File:** {stats[\"file\"]}',\n        f'- **Records:** {stats[\"row_count\"]}',\n        f'- **Total Revenue:** ${stats[\"total_revenue\"]:,.2f}' if stats.get('total_revenue') else '- **Total Revenue:** N/A',\n        f'- **Avg Quantity:** {stats[\"avg_quantity\"]:.2f}' if stats.get('avg_quantity') else '- **Avg Quantity:** N/A',\n        f'- **Avg Price:** ${stats[\"avg_price\"]:.2f}' if stats.get('avg_price') else '- **Avg Price:** N/A',\n        f'- **Schema Drift Detected:** {stats[\"schema_detected\"]}',\n        f'- **Type Issues:** {stats[\"type_issues_found\"]}',\n        f'- **Missing Values:** {stats[\"missing_values\"]}',\n        f'- **Duplicates Removed:** {stats[\"duplicates_removed\"]}',\n        f'- **Outliers Clipped:** {stats[\"outliers_clipped\"]}',\n        ''\n    ])\n\nreport_lines.extend([\n    '---',\n    '',\n    '## Evidence Log',\n    ''\n])\n\nfor entry in all_evidence:\n    report_lines.extend([\n        f'### {entry[\"quarter\"]} - {entry[\"file\"]}',\n        ''\n    ])\n    for ev in entry['evidence']:\n        report_lines.append(f'- {ev}')\n    report_lines.append('')\n\nreport_lines.extend([\n    '---',\n    '',\n    '## Methodology',\n    '',\n    '1. **Schema Drift Detection:** Compared actual columns against expected schema [date, product_id, quantity, price, revenue]',\n    '2. **Type Error Detection:** Validated numeric columns and date formats, coercing where possible',\n    '3. **Missing Value Handling:** Imputed numeric columns with median, product_id with UNKNOWN',\n    '4. **Duplicate Removal:** Dropped exact duplicate rows',\n    '5. **Outlier Clipping:** Applied IQR method (1.5x) to quantity, price, revenue',\n    '6. **Revalidation:** Confirmed all repairs were effective',\n    '',\n    '---',\n    '',\n    '*End of Report*'\n])\n\nfinal_report = '\\n'.join(report_lines)\nprint(final_report)"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "merge_and_report",
+          "output": "final_report"
+        },
+        {
+          "capability": "write_file",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "content": "${final_report}",
+            "path": "quarterly_sales_quality_report.md"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "write_report",
+          "output": "report_ref"
+        }
+      ],
+      "taskId": "fd3f5a5e-1b0a-4b1e-8c7a-9e2d4f6a8b01"
+    },
+    "initial_parse_error": null,
+    "initial_raw_response": "```json\n{\n  \"id\": \"a1b2c3d4-5678-9012-abcd-ef3456789012\",\n  \"taskId\": \"fd3f5a5e-1b0a-4b1e-8c7a-9e2d4f6a8b01\",\n  \"entry\": [\"root\"],\n  \"nodes\": [\n    {\n      \"kind\": \"sequence\",\n      \"nodeId\": \"root\",\n      \"capability\": null,\n      \"output\": null,\n      \"children\": [\"analyze_loop\", \"merge_and_report\"],\n      \"inputs\": {}\n    },\n    {\n      \"kind\": \"loop_map\",\n      \"nodeId\": \"analyze_loop\",\n      \"capability\": null,\n      \"output\": \"all_results\",\n      \"children\": [\"analyze_file\"],\n      \"inputs\": {},\n      \"control\": {\n        \"loopSpec\": {\n          \"kind\": \"for_each\",\n          \"input\": \"${file_paths}\",\n          \"itemVar\": \"file_path\"\n        }\n      }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"define_paths\",\n      \"capability\": \"execute_python\",\n      \"output\": \"file_paths\",\n      \"children\": [],\n      \"inputs\": {\n        \"code\": \"paths = [\\n  'tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv',\\n  'tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv',\\n  'tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv',\\n  'tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv'\\n]\\nprint(paths)\"\n      }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"analyze_file\",\n      \"capability\": \"execute_python\",\n      \"output\": \"file_result\",\n      \"children\": [],\n      \"inputs\": {\n        \"code\": \"import pandas as pd\\nimport numpy as np\\nimport json\\nimport hashlib\\n\\nfile_path = '${file_path}'\\nevidence = []\\n\\n# Read CSV\\ntry:\\n    df = pd.read_csv(file_path)\\n    evidence.append(f'[READ] Successfully read {file_path}: {len(df)} rows, {len(df.columns)} columns')\\nexcept Exception as e:\\n    evidence.append(f'[ERROR] Failed to read {file_path}: {str(e)}')\\n    result = {'file': file_path, 'error': str(e), 'evidence': evidence}\\n    print(json.dumps(result))\\n    return\\n\\n# 1. Schema drift detection\\nexpected_cols = ['date', 'product_id', 'quantity', 'price', 'revenue']\\nactual_cols = list(df.columns)\\nschema_drift = actual_cols != expected_cols\\nif schema_drift:\\n    evidence.append(f'[SCHEMA_DRIFT] Expected {expected_cols}, got {actual_cols}')\\n    col_map = {}\\n    for exp in expected_cols:\\n        matches = [c for c in actual_cols if exp.lower() in c.lower() or c.lower() in exp.lower()]\\n        if matches:\\n            col_map[matches[0]] = exp\\n    if col_map:\\n        df = df.rename(columns=col_map)\\n        evidence.append(f'[REPAIR] Renamed columns: {col_map}')\\n    for col in expected_cols:\\n        if col not in df.columns:\\n            df[col] = np.nan\\n            evidence.append(f'[REPAIR] Added missing column: {col}')\\nelse:\\n    evidence.append(f'[SCHEMA_OK] Columns match expected schema')\\n\\n# 2. Type errors detection and repair\\ntype_issues = 0\\nfor col in ['quantity', 'price', 'revenue']:\\n    if col in df.columns:\\n        original_dtype = df[col].dtype\\n        if not np.issubdtype(original_dtype, np.number):\\n            df[col] = pd.to_numeric(df[col], errors='coerce')\\n            new_nulls = df[col].isna().sum()\\n            evidence.append(f'[TYPE_ERROR] Column {col} was non-numeric ({original_dtype}), coerced to numeric. New NaNs: {new_nulls}')\\n            type_issues += 1\\n\\nif 'date' in df.columns:\\n    try:\\n        df['date'] = pd.to_datetime(df['date'], errors='coerce')\\n        date_nulls = df['date'].isna().sum()\\n        if date_nulls > 0:\\n            evidence.append(f'[TYPE_ERROR] {date_nulls} date values could not be parsed')\\n            type_issues += 1\\n    except Exception as e:\\n        evidence.append(f'[TYPE_ERROR] Date parsing failed: {e}')\\n\\n# 3. Missing values detection and repair\\nmissing_report = {}\\nfor col in expected_cols:\\n    if col in df.columns:\\n        missing_count = df[col].isna().sum()\\n        if missing_count > 0:\\n            missing_report[col] = int(missing_count)\\n            if col in ['quantity', 'price', 'revenue']:\\n                median_val = df[col].median()\\n                df[col] = df[col].fillna(median_val)\\n                evidence.append(f'[MISSING_REPAIR] {col}: filled {missing_count} missing with median={median_val}')\\n            elif col == 'product_id':\\n                df[col] = df[col].fillna('UNKNOWN')\\n                evidence.append(f'[MISSING_REPAIR] {col}: filled {missing_count} missing with UNKNOWN')\\n\\nif not missing_report:\\n    evidence.append('[MISSING_OK] No missing values detected')\\n\\n# 4. Duplicate detection and repair\\nduplicates = df.duplicated().sum()\\nif duplicates > 0:\\n    df = df.drop_duplicates().reset_index(drop=True)\\n    evidence.append(f'[DUPLICATE_REPAIR] Removed {duplicates} duplicate rows')\\nelse:\\n    evidence.append('[DUPLICATE_OK] No duplicates found')\\n\\n# 5. Outlier detection and repair (IQR method)\\noutlier_report = {}\\nfor col in ['quantity', 'price', 'revenue']:\\n    if col in df.columns and df[col].notna().sum() > 0:\\n        Q1 = df[col].quantile(0.25)\\n        Q3 = df[col].quantile(0.75)\\n        IQR = Q3 - Q1\\n        lower = Q1 - 1.5 * IQR\\n        upper = Q3 + 1.5 * IQR\\n        outliers = ((df[col] < lower) | (df[col] > upper)) & df[col].notna()\\n        outlier_count = outliers.sum()\\n        if outlier_count > 0:\\n            outlier_report[col] = int(outlier_count)\\n            df.loc[df[col] < lower, col] = lower\\n            df.loc[df[col] > upper, col] = upper\\n            evidence.append(f'[OUTLIER_REPAIR] {col}: clipped {outlier_count} outliers to [{lower:.2f}, {upper:.2f}]')\\n\\nif not outlier_report:\\n    evidence.append('[OUTLIER_OK] No outliers detected')\\n\\n# 6. Revalidation\\nrevalidation = []\\nfor col in expected_cols:\\n    if col in df.columns:\\n        remaining_nulls = df[col].isna().sum()\\n        if remaining_nulls > 0:\\n            revalidation.append(f'{col}: {remaining_nulls} nulls remain')\\npost_dedup_dups = df.duplicated().sum()\\nif post_dedup_dups > 0:\\n    revalidation.append(f'{post_dedup_dups} duplicates remain')\\nif revalidation:\\n    evidence.append(f'[REVALIDATION] Issues remain: {revalidation}')\\nelse:\\n    evidence.append('[REVALIDATION_OK] All repairs validated successfully')\\n\\n# 7. Compute quarterly statistics\\nstats = {\\n    'file': file_path,\\n    'row_count': len(df),\\n    'columns': list(df.columns),\\n    'schema_detected': schema_drift,\\n    'type_issues_found': type_issues,\\n    'missing_values': missing_report,\\n    'duplicates_removed': int(duplicates),\\n    'outliers_clipped': outlier_report,\\n    'total_revenue': float(df['revenue'].sum()) if 'revenue' in df.columns else None,\\n    'avg_quantity': float(df['quantity'].mean()) if 'quantity' in df.columns else None,\\n    'avg_price': float(df['price'].mean()) if 'price' in df.columns else None,\\n    'date_range': {\\n        'min': str(df['date'].min()) if 'date' in df.columns else None,\\n        'max': str(df['date'].max()) if 'date' in df.columns else None\\n    }\\n}\\n\\nresult = {\\n    'file': file_path,\\n    'statistics': stats,\\n    'evidence': evidence,\\n    'repair_status': 'fully_repaired' if not revalidation else 'partially_repaired'\\n}\\nprint(json.dumps(result, default=str))\"\n      },\n      \"control\": {\n        \"retry\": {\n          \"maxAttempts\": 3,\n          \"backoffMs\": 200,\n          \"strategy\": \"fixed\",\n          \"retryOn\": [\"timeout\", \"rate_limit\", \"transient_network_error\"]\n        }\n      }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"merge_and_report\",\n      \"capability\": \"execute_python\",\n      \"output\": \"final_report\",\n      \"children\": [],\n      \"inputs\": {\n        \"code\": \"import json\\nfrom datetime import datetime\\n\\n# Collect results from all file analyses\\nresults_json = '''${all_results}'''\\nall_results = json.loads(results_json)\\n\\n# Merge statistics\\nmerged_stats = {\\n    'total_files_processed': len(all_results),\\n    'quarters': {},\\n    'total_revenue_all': 0,\\n    'total_records': 0,\\n    'files_with_issues': 0,\\n    'files_fully_repaired': 0,\\n    'files_partially_repaired': 0\\n}\\n\\nall_evidence = []\\n\\nfor result in all_results:\\n    file_path = result['file']\\n    quarter = file_path.split('_')[-1].replace('.csv', '').upper()\\n    stats = result['statistics']\\n    evidence = result['evidence']\\n    repair_status = result['repair_status']\\n    \\n    merged_stats['quarters'][quarter] = stats\\n    merged_stats['total_records'] += stats['row_count']\\n    \\n    if stats.get('total_revenue'):\\n        merged_stats['total_revenue_all'] += stats['total_revenue']\\n    \\n    if repair_status == 'fully_repaired':\\n        merged_stats['files_fully_repaired'] += 1\\n    else:\\n        merged_stats['files_partially_repaired'] += 1\\n    \\n    if stats.get('schema_detected') or stats.get('type_issues_found', 0) > 0 or stats.get('missing_values') or stats.get('duplicates_removed', 0) > 0 or stats.get('outliers_clipped'):\\n        merged_stats['files_with_issues'] += 1\\n    \\n    all_evidence.append({\\n        'file': file_path,\\n        'quarter': quarter,\\n        'evidence': evidence\\n    })\\n\\n# Quality review\\nquality_review = {\\n    'overall_status': 'PASS' if merged_stats['files_partially_repaired'] == 0 else 'PARTIAL_PASS',\\n    'summary': f\\\"Processed {merged_stats['total_files_processed']} files with {merged_stats['total_records']} total records.\\\",\\n    'issues_found_in': merged_stats['files_with_issues'],\\n    'fully_repaired': merged_stats['files_fully_repaired'],\\n    'partially_repaired': merged_stats['files_partially_repaired'],\\n    'recommendations': []\\n}\\n\\nif merged_stats['files_partially_repaired'] > 0:\\n    quality_review['recommendations'].append('Some files had remaining issues after repair. Manual review recommended.')\\nif merged_stats['files_with_issues'] == 0:\\n    quality_review['recommendations'].append('All files passed quality checks. No action needed.')\\n\\n# Generate Markdown report\\nreport_lines = [\\n    '# Quarterly Sales Data Quality Report',\\n    '',\\n    f'**Generated:** {datetime.now().strftime(\\\"%Y-%m-%d %H:%M:%S\\\")}',\\n    f'**Files Analyzed:** {merged_stats[\\\"total_files_processed\\\"]}',\\n    '',\\n    '---',\\n    '',\\n    '## Executive Summary',\\n    '',\\n    f'- **Total Records Processed:** {merged_stats[\\\"total_records\\\"]}',\\n    f'- **Total Revenue (All Quarters):** ${merged_stats[\\\"total_revenue_all\\\"]:,.2f}',\\n    f'- **Files with Issues:** {merged_stats[\\\"files_with_issues\\\"]}/{merged_stats[\\\"total_files_processed\\\"]}',\\n    f'- **Fully Repaired:** {merged_stats[\\\"files_fully_repaired\\\"]}',\\n    f'- **Partially Repaired:** {merged_stats[\\\"files_partially_repaired\\\"]}',\\n    '',\\n    '---',\\n    '',\\n    '## Quality Review',\\n    '',\\n    f'**Overall Status:** {quality_review[\\\"overall_status\\\"]}',\\n    '',\\n    f'{quality_review[\\\"summary\\\"]}',\\n    ''\\n]\\n\\nif quality_review['recommendations']:\\n    report_lines.append('### Recommendations')\\n    report_lines.append('')\\n    for rec in quality_review['recommendations']:\\n        report_lines.append(f'- {rec}')\\n    report_lines.append('')\\n\\nreport_lines.extend([\\n    '---',\\n    '',\\n    '## Quarterly Statistics',\\n    ''\\n])\\n\\nfor quarter, stats in sorted(merged_stats['quarters'].items()):\\n    report_lines.extend([\\n        f'### {quarter}',\\n        '',\\n        f'- **File:** {stats[\\\"file\\\"]}',\\n        f'- **Records:** {stats[\\\"row_count\\\"]}',\\n        f'- **Total Revenue:** ${stats[\\\"total_revenue\\\"]:,.2f}' if stats.get('total_revenue') else '- **Total Revenue:** N/A',\\n        f'- **Avg Quantity:** {stats[\\\"avg_quantity\\\"]:.2f}' if stats.get('avg_quantity') else '- **Avg Quantity:** N/A',\\n        f'- **Avg Price:** ${stats[\\\"avg_price\\\"]:.2f}' if stats.get('avg_price') else '- **Avg Price:** N/A',\\n        f'- **Schema Drift Detected:** {stats[\\\"schema_detected\\\"]}',\\n        f'- **Type Issues:** {stats[\\\"type_issues_found\\\"]}',\\n        f'- **Missing Values:** {stats[\\\"missing_values\\\"]}',\\n        f'- **Duplicates Removed:** {stats[\\\"duplicates_removed\\\"]}',\\n        f'- **Outliers Clipped:** {stats[\\\"outliers_clipped\\\"]}',\\n        ''\\n    ])\\n\\nreport_lines.extend([\\n    '---',\\n    '',\\n    '## Evidence Log',\\n    ''\\n])\\n\\nfor entry in all_evidence:\\n    report_lines.extend([\\n        f'### {entry[\\\"quarter\\\"]} - {entry[\\\"file\\\"]}',\\n        ''\\n    ])\\n    for ev in entry['evidence']:\\n        report_lines.append(f'- {ev}')\\n    report_lines.append('')\\n\\nreport_lines.extend([\\n    '---',\\n    '',\\n    '## Methodology',\\n    '',\\n    '1. **Schema Drift Detection:** Compared actual columns against expected schema [date, product_id, quantity, price, revenue]',\\n    '2. **Type Error Detection:** Validated numeric columns and date formats, coercing where possible',\\n    '3. **Missing Value Handling:** Imputed numeric columns with median, product_id with UNKNOWN',\\n    '4. **Duplicate Removal:** Dropped exact duplicate rows',\\n    '5. **Outlier Clipping:** Applied IQR method (1.5x) to quantity, price, revenue',\\n    '6. **Revalidation:** Confirmed all repairs were effective',\\n    '',\\n    '---',\\n    '',\\n    '*End of Report*'\\n])\\n\\nfinal_report = '\\\\n'.join(report_lines)\\nprint(final_report)\"\n      }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"write_report\",\n      \"capability\": \"write_file\",\n      \"output\": \"report_ref\",\n      \"children\": [],\n      \"inputs\": {\n        \"path\": \"quarterly_sales_quality_report.md\",\n        \"content\": \"${final_report}\"\n      }\n    }\n  ],\n  \"effects\": [\n    {\n      \"kind\": \"fs_read\",\n      \"description\": \"read quarterly sales CSV files from dataset directory\",\n      \"reversible\": true\n    },\n    {\n      \"kind\": \"fs_write\",\n      \"description\": \"write consolidated Markdown quality report\",\n      \"reversible\": true\n    },\n    {\n      \"kind\": \"process_spawn\",\n      \"description\": \"execute Python for data analysis, repair, and report generation\",\n      \"reversible\": true\n    }\n  ]\n}\n```",
+    "repair_count": 0,
+    "repair_traces": []
+  },
+  "program_metrics": {
+    "capability_types": [
+      "execute_python",
+      "write_file"
+    ],
+    "condition_count": 0,
+    "control_node_count": 2,
+    "loop_count": 1,
+    "node_count": 6,
+    "primitive_count": 4,
+    "retry_count": 1
+  },
+  "repair_tax": {
+    "first_pass_success": true,
+    "repair_attempts_used": 0,
+    "repair_latency_ms": 0
+  },
+  "run": {
+    "compile_success": true,
+    "final_error": null,
+    "model": "LongCat-2.0",
+    "run_index": 1,
+    "timestamp": "2026-09-04T07:52:06Z"
+  },
+  "timing": {
+    "initial_llm_ms": 121629,
+    "repair_llm_ms": 0,
+    "total_compile_ms": 121629,
+    "total_wall_ms": 122019
+  }
+}

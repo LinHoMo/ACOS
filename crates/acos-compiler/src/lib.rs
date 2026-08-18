@@ -80,6 +80,20 @@ pub enum CompilerError {
         /// Human-readable explanation.
         message: String,
     },
+    /// The program contains no executable node (no primitives at all).
+    ///
+    /// Added in P1-5B Probe-2 analysis: zero-node / zero-primitive graphs
+    /// trivially pass structural checks but cannot satisfy any task output.
+    NoOpProgram,
+    /// Nodes that are not reachable from any entry node.
+    ///
+    /// Added in P1-5B Probe-2c analysis (run-001): orphan nodes silently
+    /// reduce what the program actually does (e.g. a `write_file` that never
+    /// runs). Reject so the repair loop re-links them into the graph.
+    UnreachableNodes {
+        /// Node ids that are unreachable from `program.entry`.
+        node_ids: Vec<String>,
+    },
     /// Repair was attempted but did not produce a valid CIR within the attempt limit.
     RepairExhausted {
         /// Number of repair attempts made (excluding the initial attempt).
@@ -112,6 +126,16 @@ impl std::fmt::Display for CompilerError {
             }
             CompilerError::InvalidEffect { message } => {
                 write!(f, "invalid effect declaration: {message}")
+            }
+            CompilerError::NoOpProgram => {
+                write!(f, "no-op program: the CIR contains no executable node")
+            }
+            CompilerError::UnreachableNodes { node_ids } => {
+                write!(
+                    f,
+                    "unreachable nodes: {} are not reachable from any entry node",
+                    node_ids.join(", ")
+                )
             }
             CompilerError::RepairExhausted { attempts, last_error } => {
                 write!(f, "repair exhausted after {attempts} attempts; last error: {last_error}")
@@ -406,14 +430,27 @@ impl ModelCompiler {
     }
 
     /// Builds a repair prompt from a previous failed attempt.
-    fn build_repair_prompt(&self, raw_output: &str, error: &CompilerError) -> String {
+    ///
+    /// P1-5B Probe-2 finding: first-pass responses are empty (EOF) in 100% of
+    /// runs, making the repair call the de facto generation call. The old
+    /// repair prompt carried only the error — no task facts — so the model
+    /// could not bind inputs or preserve goal semantics. The Compile Context
+    /// (facts, not answers) is now included in every repair call.
+    fn build_repair_prompt(
+        &self,
+        task: &TaskSpec,
+        raw_output: &str,
+        error: &CompilerError,
+    ) -> String {
         let excerpt = if raw_output.len() > 500 {
             &raw_output[..500]
         } else {
             raw_output
         };
         format!(
-            "Your previous output failed CIR validation.\n\n\
+            "Your previous output failed CIR validation. Recompile the task below.\n\n\
+             {context}\n\n\
+             Previous error:\n\
              Error type: {}\n\
              Details: {}\n\n\
              Original output excerpt:\n```\n{}\n```\n\n\
@@ -424,7 +461,8 @@ impl ModelCompiler {
                 .last()
                 .unwrap_or("Unknown"),
             error,
-            excerpt
+            excerpt,
+            context = self.build_user_prompt(task),
         )
     }
 
@@ -552,7 +590,7 @@ impl ModelCompiler {
 
                 // Repair loop
                 for attempt in 1..=max_repair_attempts {
-                    let repair_prompt = self.build_repair_prompt(&raw, &last_error);
+                    let repair_prompt = self.build_repair_prompt(task, &raw, &last_error);
 
                     diagnostics.push(Diagnostic {
                         level: DiagnosticLevel::Note,
@@ -916,6 +954,42 @@ fn validate_cir_semantic(program: &CirProgram) -> Result<(), CompilerError> {
     validate_capabilities(program)?;
     validate_control_semantics_detailed(program)?;
     validate_effects(program)?;
+
+    // Reachability: every node must be reachable from an entry node.
+    // Orphan nodes (P1-5B Probe-2c run-001) silently do nothing: the model
+    // declared `define_paths`/`write_report` but never linked them into the
+    // graph, so execution "succeeded" with no artifact produced.
+    let mut reachable: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut stack: Vec<&str> = program.entry.iter().map(String::as_str).collect();
+    let mut by_id: std::collections::HashMap<&str, &CirNode> = program
+        .nodes
+        .iter()
+        .map(|n| (n.node_id.as_str(), n))
+        .collect();
+    while let Some(id) = stack.pop() {
+        if !reachable.insert(id) {
+            continue;
+        }
+        if let Some(node) = by_id.get(id) {
+            stack.extend(node.children.iter().map(String::as_str));
+            stack.extend(node.else_children.iter().map(String::as_str));
+        }
+    }
+    let orphans: Vec<String> = program
+        .nodes
+        .iter()
+        .filter(|n| !reachable.contains(n.node_id.as_str()))
+        .map(|n| n.node_id.clone())
+        .collect();
+    if !orphans.is_empty() {
+        return Err(CompilerError::UnreachableNodes { node_ids: orphans });
+    }
+
+    // No-op guard: a program with zero primitives cannot produce any task
+    // output. Reject it so "compile success" means the program does something.
+    if !program.nodes.iter().any(|n| n.capability.is_some()) {
+        return Err(CompilerError::NoOpProgram);
+    }
 
     Ok(())
 }
@@ -1474,8 +1548,98 @@ mod tests {
     }
 
     #[test]
-    fn compiler_error_display_formats_correctly() {
-        let err = CompilerError::UnknownCapability {
+    fn validate_rejects_no_op_program() {
+        let root = CirNode {
+            kind: CirNodeKind::Sequence,
+            node_id: "root".into(),
+            capability: None,
+            output: None,
+            children: vec![],
+            else_children: vec![],
+            inputs: HashMap::new(),
+            control: None,
+        };
+        let program = CirProgram {
+            id: ProgramId::new(),
+            task_id: TaskId(uuid::Uuid::new_v4()),
+            entry: vec!["root".into()],
+            nodes: vec![root],
+            effects: vec![],
+        };
+        let err = validate_cir_semantic(&program).unwrap_err();
+        assert!(
+            matches!(err, CompilerError::NoOpProgram),
+            "zero-primitive program should be rejected, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_rejects_unreachable_nodes() {
+        let mut run = CirNode {
+            kind: CirNodeKind::PrimitiveInvocation,
+            node_id: "run".into(),
+            capability: Some("execute_python".into()),
+            output: Some("result".into()),
+            children: vec![],
+            else_children: vec![],
+            inputs: HashMap::new(),
+            control: None,
+        };
+        run.inputs.insert(
+            "code".into(),
+            serde_json::Value::String("print('x')".into()),
+        );
+        let mut write = CirNode {
+            kind: CirNodeKind::PrimitiveInvocation,
+            node_id: "write_report".into(),
+            capability: Some("write_file".into()),
+            output: None,
+            children: vec![],
+            else_children: vec![],
+            inputs: HashMap::new(),
+            control: None,
+        };
+        write.inputs.insert(
+            "path".into(),
+            serde_json::Value::String("report.md".into()),
+        );
+        let program = CirProgram {
+            id: ProgramId::new(),
+            task_id: TaskId(uuid::Uuid::new_v4()),
+            entry: vec!["run".into()],
+            nodes: vec![run, write],
+            effects: vec![],
+        };
+        let err = validate_cir_semantic(&program).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CompilerError::UnreachableNodes { ref node_ids } if node_ids == &vec!["write_report".to_string()]
+            ),
+            "orphan node should be rejected, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn repair_prompt_includes_compile_context() {
+        let compiler = make_test_compiler();
+        let task = sample_task();
+        let err = CompilerError::JsonSyntaxError {
+            message: "boom".into(),
+            raw_excerpt: "{}".into(),
+        };
+        let prompt = compiler.build_repair_prompt(&task, "", &err);
+        assert!(
+            prompt.contains("a.csv") && prompt.contains("b.csv"),
+            "repair prompt must carry declared input paths (task facts)"
+        );
+        assert!(prompt.contains("Input Bindings"));
+    }
+
+    #[test]
+    fn compiler_error_display_formats_correctly() {        let err = CompilerError::UnknownCapability {
             node_id: "n1".into(),
             capability: "fly".into(),
         };

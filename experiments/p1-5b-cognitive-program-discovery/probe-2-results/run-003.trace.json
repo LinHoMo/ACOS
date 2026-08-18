@@ -1,0 +1,156 @@
+{
+  "behavioral_analysis": {
+    "binding_matched": 0,
+    "binding_total": 4,
+    "checks": [
+      {
+        "detail": "0/4 declared paths referenced",
+        "name": "BR-1 Multi-File Processing",
+        "verdict": "FAIL"
+      },
+      {
+        "detail": "only read/write",
+        "name": "BR-2 Data Quality Analysis",
+        "verdict": "FAIL"
+      },
+      {
+        "detail": "conditions=0, python=false",
+        "name": "BR-3 Anomaly Detection/Repair",
+        "verdict": "FAIL"
+      },
+      {
+        "detail": "write_file present",
+        "name": "BR-4 Structured Report",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "3 nodes, 2 primitives",
+        "name": "BR-5 Evidence/Audit Trail",
+        "verdict": "FAIL"
+      },
+      {
+        "detail": "0 loops, 0 conds, 0 retries",
+        "name": "BR-6 Control Flow Complexity",
+        "verdict": "FAIL"
+      },
+      {
+        "detail": "undeclared: [\"/absolute/path/to/input.txt\"]",
+        "name": "BR-7 No Hallucinated Resources",
+        "verdict": "FAIL"
+      }
+    ],
+    "condition_count": 0,
+    "loop_count": 0,
+    "node_count": 3,
+    "pass_count": 1,
+    "primitive_count": 2,
+    "retry_count": 0
+  },
+  "execution": {
+    "error": "primitive failure: failed to read /absolute/path/to/input.txt: 系统找不到指定的路径。 (os error 3) (primitive=Some(\"read_file\"), class=Unknown)",
+    "ok": false
+  },
+  "input": {
+    "prompt_sent": "Compile the following ACOS task into a CIR execution graph.\n\n# Task Goal\n\nAnalyze all quarterly sales CSV files in the dataset directory. For each file: detect data-quality issues (schema drift, type errors, missing values, duplicates, outliers); repair recoverable issues; revalidate repaired inputs; compute quarterly statistics; merge results; run a quality review; and generate a consolidated Markdown report with an evidence log.\n\n# Input Bindings (AUTHORITATIVE — use these exact paths)\n\nThe following input files are declared by the task and MUST be used:\n\n1. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv\", format=\"csv\"\n2. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv\", format=\"csv\"\n3. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv\", format=\"csv\"\n4. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv\", format=\"csv\"\n\n# Required Outputs\n\nThe CIR MUST produce:\n\n- type=\"Report\", format=\"markdown\"\n\n# Constraints\n\n\n# Optimization: primary=\"reliability\", secondary=\"cost\"\n\n# Approval: externalSideEffects=\"required\"\n\n# Full TaskSpec (reference JSON)\n\n```json\n{\n  \"apiVersion\": \"acos.io/v1\",\n  \"id\": \"fd3f5a5e-1b0a-4b1e-8c7a-9e2d4f6a8b01\",\n  \"goal\": \"Analyze all quarterly sales CSV files in the dataset directory. For each file: detect data-quality issues (schema drift, type errors, missing values, duplicates, outliers); repair recoverable issues; revalidate repaired inputs; compute quarterly statistics; merge results; run a quality review; and generate a consolidated Markdown report with an evidence log.\",\n  \"inputs\": [\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv\",\n      \"format\": \"csv\"\n    },\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv\",\n      \"format\": \"csv\"\n    },\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv\",\n      \"format\": \"csv\"\n    },\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv\",\n      \"format\": \"csv\"\n    }\n  ],\n  \"outputs\": [\n    {\n      \"type\": \"Report\",\n      \"format\": \"markdown\"\n    }\n  ],\n  \"constraints\": {\n    \"timeoutSeconds\": null,\n    \"maxCost\": null,\n    \"allowedNetwork\": null\n  },\n  \"optimization\": {\n    \"primary\": \"reliability\",\n    \"secondary\": \"cost\"\n  },\n  \"approval\": {\n    \"externalSideEffects\": \"required\"\n  }\n}\n```\n",
+    "task_spec_path": "tests/benchmarks/p1/flagship_csv_quality/acos_task.yaml"
+  },
+  "output": {
+    "final_cir": {
+      "effects": [
+        {
+          "description": "read input file",
+          "kind": "fs_read",
+          "reversible": true
+        },
+        {
+          "description": "write report artifact",
+          "kind": "fs_write",
+          "reversible": true
+        }
+      ],
+      "entry": [
+        "root"
+      ],
+      "id": "a7798112-fb03-4b3a-8541-77797c873913",
+      "nodes": [
+        {
+          "capability": null,
+          "children": [
+            "step_0",
+            "step_1"
+          ],
+          "elseChildren": [],
+          "inputs": {},
+          "kind": "sequence",
+          "nodeId": "root",
+          "output": null
+        },
+        {
+          "capability": "read_file",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "path": "/absolute/path/to/input.txt"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "step_0",
+          "output": "raw_0"
+        },
+        {
+          "capability": "write_file",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "content": "${raw_0}",
+            "path": "report.md"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "step_1",
+          "output": "report_ref"
+        }
+      ],
+      "taskId": "fd3f5a5e-1b0a-4b1e-8c7a-9e2d4f6a8b01"
+    },
+    "initial_parse_error": "JSON syntax error: EOF while parsing a value at line 1 column 0",
+    "initial_raw_response": "",
+    "repair_count": 1,
+    "repair_traces": [
+      {
+        "attempt": 1,
+        "prompt": "Your previous output failed CIR validation.\n\nError type: CompilerError\nDetails: JSON syntax error: EOF while parsing a value at line 1 column 0\n\nOriginal output excerpt:\n```\n\n```\n\nPlease analyze the error and return a corrected CIR JSON.\nRespond with ONLY the corrected JSON, no commentary.",
+        "raw_response": "{\n  \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n  \"taskId\": \"f0e1d2c3-b4a5-6978-8a9b-0c1d2e3f4a5b\",\n  \"entry\": [\"root\"],\n  \"nodes\": [\n    {\n      \"kind\": \"sequence\",\n      \"nodeId\": \"root\",\n      \"capability\": null,\n      \"output\": null,\n      \"children\": [\"step_0\", \"step_1\"],\n      \"inputs\": {}\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"step_0\",\n      \"capability\": \"read_file\",\n      \"output\": \"raw_0\",\n      \"children\": [],\n      \"inputs\": {\n        \"path\": \"/absolute/path/to/input.txt\"\n      }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"step_1\",\n      \"capability\": \"write_file\",\n      \"output\": \"report_ref\",\n      \"children\": [],\n      \"inputs\": {\n        \"path\": \"report.md\",\n        \"content\": \"${raw_0}\"\n      }\n    }\n  ],\n  \"effects\": [\n    {\n      \"kind\": \"fs_read\",\n      \"description\": \"read input file\",\n      \"reversible\": true\n    },\n    {\n      \"kind\": \"fs_write\",\n      \"description\": \"write report artifact\",\n      \"reversible\": true\n    }\n  ]\n}",
+        "validation_error": null
+      }
+    ]
+  },
+  "program_metrics": {
+    "capability_types": [
+      "read_file",
+      "write_file"
+    ],
+    "condition_count": 0,
+    "control_node_count": 0,
+    "loop_count": 0,
+    "node_count": 3,
+    "primitive_count": 2,
+    "retry_count": 0
+  },
+  "repair_tax": {
+    "first_pass_success": false,
+    "repair_attempts_used": 1,
+    "repair_latency_ms": 34829
+  },
+  "run": {
+    "compile_success": true,
+    "final_error": null,
+    "model": "LongCat-2.0",
+    "run_index": 3,
+    "timestamp": "2026-09-04T07:09:15Z"
+  },
+  "timing": {
+    "initial_llm_ms": 113043,
+    "repair_llm_ms": 34829,
+    "total_compile_ms": 147873,
+    "total_wall_ms": 147879
+  }
+}

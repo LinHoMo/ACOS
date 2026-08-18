@@ -96,6 +96,7 @@ program:
   - `while`：先求值条件再执行；`until`：先执行再求值（避免 off-by-one）。
   - `for_each`：以数组长度自然终止；`while`/`until` **必须**显式提供 `max_iterations >= 1`（终止性保证）。
   - `max_iterations == 0` 在编译期被拒绝。
+- `loop_map` 节点的 `output` 语义（P1-5B Probe-2c 补充）：每次迭代结束后，取**最后一个 child** 声明的 `output` 绑定值收集为数组；循环结束后绑定到该 `output` 名（无迭代时为空数组）。下游节点通过 `"${loop_output}"` 引用聚合结果。
 - `retry` 仅对暂态类（`timeout` / `rate_limit` / `transient`）生效，且节点原语必须 retry-safe
   （`idempotent()` 为真，或所有效果为纯读）；`ExternalIrreversible` 效果**禁止**重试。
   请求在非 retry-safe 原语上重试会在编译期被拒绝（提示 `irreversible`）。

@@ -1,0 +1,222 @@
+{
+  "behavioral_analysis": {
+    "binding_matched": 4,
+    "binding_total": 4,
+    "checks": [
+      {
+        "detail": "4/4 declared paths referenced",
+        "name": "BR-1 Multi-File Processing",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "analysis caps: {\"write_file\", \"execute_python\"}",
+        "name": "BR-2 Data Quality Analysis",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "conditions=0, python=true",
+        "name": "BR-3 Anomaly Detection/Repair",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "write_file present",
+        "name": "BR-4 Structured Report",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "8 nodes, 6 primitives",
+        "name": "BR-5 Evidence/Audit Trail",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "1 loops, 0 conds, 0 retries",
+        "name": "BR-6 Control Flow Complexity",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "all paths declared",
+        "name": "BR-7 No Hallucinated Resources",
+        "verdict": "PASS"
+      }
+    ],
+    "condition_count": 0,
+    "loop_count": 1,
+    "node_count": 8,
+    "pass_count": 7,
+    "primitive_count": 6,
+    "retry_count": 0
+  },
+  "execution": {
+    "error": "primitive failure: python exited Some(1): Traceback (most recent call last):\r\n  File \"<string>\", line 5, in <module>\r\nKeyError: 'total_issues'\r\n (primitive=Some(\"execute_python\"), class=Unknown)",
+    "ok": false
+  },
+  "input": {
+    "prompt_sent": "Compile the following ACOS task into a CIR execution graph.\n\n# Task Goal\n\nAnalyze all quarterly sales CSV files in the dataset directory. For each file: detect data-quality issues (schema drift, type errors, missing values, duplicates, outliers); repair recoverable issues; revalidate repaired inputs; compute quarterly statistics; merge results; run a quality review; and generate a consolidated Markdown report with an evidence log.\n\n# Input Bindings (AUTHORITATIVE — use these exact paths)\n\nThe following input files are declared by the task and MUST be used:\n\n1. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv\", format=\"csv\"\n2. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv\", format=\"csv\"\n3. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv\", format=\"csv\"\n4. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv\", format=\"csv\"\n\n# Required Outputs\n\nThe CIR MUST produce:\n\n- type=\"Report\", format=\"markdown\"\n\n# Constraints\n\n\n# Optimization: primary=\"reliability\", secondary=\"cost\"\n\n# Approval: externalSideEffects=\"required\"\n\n# Full TaskSpec (reference JSON)\n\n```json\n{\n  \"apiVersion\": \"acos.io/v1\",\n  \"id\": \"fd3f5a5e-1b0a-4b1e-8c7a-9e2d4f6a8b01\",\n  \"goal\": \"Analyze all quarterly sales CSV files in the dataset directory. For each file: detect data-quality issues (schema drift, type errors, missing values, duplicates, outliers); repair recoverable issues; revalidate repaired inputs; compute quarterly statistics; merge results; run a quality review; and generate a consolidated Markdown report with an evidence log.\",\n  \"inputs\": [\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv\",\n      \"format\": \"csv\"\n    },\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv\",\n      \"format\": \"csv\"\n    },\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv\",\n      \"format\": \"csv\"\n    },\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv\",\n      \"format\": \"csv\"\n    }\n  ],\n  \"outputs\": [\n    {\n      \"type\": \"Report\",\n      \"format\": \"markdown\"\n    }\n  ],\n  \"constraints\": {\n    \"timeoutSeconds\": null,\n    \"maxCost\": null,\n    \"allowedNetwork\": null\n  },\n  \"optimization\": {\n    \"primary\": \"reliability\",\n    \"secondary\": \"cost\"\n  },\n  \"approval\": {\n    \"externalSideEffects\": \"required\"\n  }\n}\n```\n",
+    "task_spec_path": "tests/benchmarks/p1/flagship_csv_quality/acos_task.yaml"
+  },
+  "output": {
+    "final_cir": {
+      "effects": [
+        {
+          "description": "read quarterly sales CSV files",
+          "kind": "fs_read",
+          "reversible": true
+        },
+        {
+          "description": "write consolidated markdown report",
+          "kind": "fs_write",
+          "reversible": true
+        },
+        {
+          "description": "execute Python data processing scripts",
+          "kind": "process_spawn",
+          "reversible": true
+        }
+      ],
+      "entry": [
+        "root"
+      ],
+      "id": "66b9c161-6b40-46d6-8f77-442dd07e42af",
+      "nodes": [
+        {
+          "capability": null,
+          "children": [
+            "init",
+            "process_loop",
+            "merge",
+            "review",
+            "gen_report",
+            "write_report"
+          ],
+          "elseChildren": [],
+          "inputs": {},
+          "kind": "sequence",
+          "nodeId": "root",
+          "output": null
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import json\nfiles = ['tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv', 'tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv', 'tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv', 'tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv']\nprint(json.dumps(files))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "init",
+          "output": "file_list"
+        },
+        {
+          "capability": null,
+          "children": [
+            "process_file"
+          ],
+          "control": {
+            "loopSpec": {
+              "condition": null,
+              "input": "${file_list}",
+              "itemVar": "csv_path",
+              "kind": "for_each",
+              "maxIterations": null
+            }
+          },
+          "elseChildren": [],
+          "inputs": {},
+          "kind": "loop_map",
+          "nodeId": "process_loop",
+          "output": "all_results"
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import json,csv,statistics,math\ncsv_path='${csv_path}'\nwith open(csv_path,'r') as f:\n reader=csv.DictReader(f);rows=list(reader);fn=reader.fieldnames or []\nec=['date','product','quantity','unit_price','total','region']\nnc=['quantity','unit_price','total']\nI={'schema_drift':{'detected':False,'unexpected_columns':[],'missing_columns':[]},'type_errors':{'detected':False,'details':[]},'missing_values':{'detected':False,'columns':{}},'duplicates':{'detected':False,'count':0},'outliers':{'detected':False,'details':[]}}\nes,as_=set(ec),set(fn)\nif as_!=es:\n I['schema_drift']['detected']=True;I['schema_drift']['unexpected_columns']=sorted(list(as_-es));I['schema_drift']['missing_columns']=sorted(list(es-as_))\nfor c in fn:\n mc=sum(1 for r in rows if not r.get(c) or r.get(c).strip()=='')\n if mc>0:I['missing_values']['detected']=True;I['missing_values']['columns'][c]=mc\ns=set()\nfor r in rows:\n t=tuple(sorted(r.items()))\n if t in s:I['duplicates']['detected']=True;I['duplicates']['count']+=1\n s.add(t)\nfor c in nc:\n if c in fn:\n  vs=[]\n  for i,r in enumerate(rows):\n   v=r.get(c,'').strip()\n   if v:\n    try:vs.append((i,float(v)))\n    except ValueError:I['type_errors']['detected']=True;I['type_errors']['details'].append({'row':i,'column':c,'value':v})\n  if len(vs)>1:\n   ns=[x[1] for x in vs];mean=sum(ns)/len(ns);std=math.sqrt(sum((n-mean)**2 for n in ns)/len(ns))\n   if std>0:\n    for i,fv in vs:\n     if abs(fv-mean)>3*std:I['outliers']['detected']=True;I['outliers']['details'].append({'row':i,'column':c,'value':fv})\nRp=[];RR=[dict(r) for r in rows]\nfor te in I['type_errors']['details']:\n i,c,v=te['row'],te['column'],te['value']\n try:RR[i][c]=str(float(v));Rp.append({'action':'type_fixed','row':i,'column':c})\n except ValueError:RR[i][c]=None;Rp.append({'action':'type_null','row':i,'column':c})\nfor c in fn:\n if c in nc:\n  vs=[float(r[c]) for r in RR if r.get(c) and r[c].strip() and r[c] is not None]\n  med=statistics.median(vs) if vs else 0\n  for i,r in enumerate(RR):\n   if not r.get(c) or r[c].strip()=='' or r[c] is None:RR[i][c]=str(med);Rp.append({'action':'fill_median','row':i,'column':c,'value':med})\n else:\n  for i,r in enumerate(RR):\n   if not r.get(c) or r[c].strip()=='' or r[c] is None:RR[i][c]='UNKNOWN';Rp.append({'action':'fill_unknown','row':i,'column':c})\nif I['duplicates']['detected']:\n u=[];s2=set()\n for r in RR:\n  t=tuple(sorted(r.items()))\n  if t not in s2:u.append(r);s2.add(t)\n Rp.append({'action':'remove_duplicates','removed':len(RR)-len(u)});RR=u\nRv={'remaining_issues':[],'passed':True}\nfor c in fn:\n mc=sum(1 for r in RR if not r.get(c) or r[c].strip()=='' or r[c] is None)\n if mc>0:Rv['remaining_issues'].append({'type':'missing_values','column':c,'count':mc});Rv['passed']=False\nfor c in nc:\n if c in fn:\n  for i,r in enumerate(RR):\n   v=r.get(c)\n   if v and str(v).strip():\n    try:float(v)\n    except(ValueError,TypeError):Rv['remaining_issues'].append({'type':'type_error','row':i,'column':c});Rv['passed']=False\nS={'file':csv_path,'total_rows':len(RR),'columns':fn}\nfor c in nc:\n if c in fn:\n  vs=[]\n  for r in RR:\n   try:vs.append(float(r[c]))\n   except(ValueError,TypeError):pass\n  if vs:S[c]={'sum':round(sum(vs),2),'mean':round(sum(vs)/len(vs),2),'min':round(min(vs),2),'max':round(max(vs),2),'count':len(vs)}\nprint(json.dumps({'file':csv_path,'issues':I,'repairs':Rp,'revalidation':Rv,'statistics':S}))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "process_file",
+          "output": "file_result"
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import json\nAR=${all_results}\nif isinstance(AR,str):AR=json.loads(AR)\nP=[json.loads(r) if isinstance(r,str) else r for r in AR]\nM={'quarters':[],'total_rows':0,'total_issues':0,'total_repairs':0,'all_issues':[],'all_repairs':[],'all_revalidations':[]}\nfor r in P:\n M['quarters'].append(r['statistics']);M['total_rows']+=r['statistics']['total_rows']\n ic=sum(1 for v in r['issues'].values() if isinstance(v,dict) and v.get('detected'));M['total_issues']+=ic\n M['total_repairs']+=len(r['repairs']);M['all_issues'].append({'file':r['file'],'issues':r['issues']});M['all_repairs'].append({'file':r['file'],'repairs':r['repairs']});M['all_revalidations'].append({'file':r['file'],'revalidation':r['revalidation']})\nprint(json.dumps(M))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "merge",
+          "output": "merged_data"
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import json\nM=${merged_data}\nif isinstance(M,str):M=json.loads(M)\nR={'overall_quality':'GOOD','concerns':[],'recommendations':[]}\nif M['total_issues']>10:R['overall_quality']='FAIR';R['concerns'].append('High number of data quality issues detected')\nif M['total_repairs']>0:R['recommendations'].append('Review automated repairs for accuracy')\nfor rv in M['all_revalidations']:\n if not rv['revalidation']['passed']:R['concerns'].append(rv['file']+': revalidation failed');R['overall_quality']='NEEDS_ATTENTION'\nprint(json.dumps(R))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "review",
+          "output": "review_result"
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import json\nM=${merged_data}\nR=${review_result}\nif isinstance(M,str):M=json.loads(M)\nif isinstance(R,str):R=json.loads(R)\nmd='# Quarterly Sales Data Quality Report\\n\\n'\nmd+='## Executive Summary\\n\\n| Metric | Value |\\n|--------|-------|\\n'\nmd+=f\"| Quarters Analyzed | {len(M['quarters'])} |\\n\"\nmd+=f\"| Total Rows | {M['total_rows']} |\\n\"\nmd+=f\"| Total Issues | {M['total_issues']} |\\n\"\nmd+=f\"| Total Repairs | {M['total_repairs']} |\\n\"\nmd+=f\"| Overall Quality | {R['overall_quality']} |\\n\\n\"\nmd+='## Quarterly Statistics\\n\\n'\nfor i,q in enumerate(M['quarters']):\n md+=f\"### Q{i+1}: {q['file']}\\n\\n\"\n md+=f\"- Total rows: {q['total_rows']}\\n\"\n for col in ['quantity','unit_price','total']:\n  if col in q:md+=f\"- {col}: sum={q[col]['sum']}, mean={q[col]['mean']}, min={q[col]['min']}, max={q[col]['max']}\\n\"\n md+='\\n'\nmd+='## Data Quality Issues\\n\\n'\nfor item in M['all_issues']:\n md+=f\"### {item['file']}\\n\\n\"\n for it,det in item['issues'].items():\n  if isinstance(det,dict) and det.get('detected'):md+=f\"- **{it}**: {json.dumps(det)}\\n\"\n md+='\\n'\nmd+='## Repairs Performed\\n\\n'\nfor item in M['all_repairs']:\n md+=f\"### {item['file']}\\n\\n\"\n for rep in item['repairs']:md+=f\"- {rep['action']}: {json.dumps(rep)}\\n\"\n md+='\\n'\nmd+='## Revalidation Results\\n\\n'\nfor item in M['all_revalidations']:\n md+=f\"### {item['file']}\\n\\n\"\n md+=f\"- Passed: {item['revalidation']['passed']}\\n\"\n if item['revalidation']['remaining_issues']:md+=f\"- Remaining issues: {json.dumps(item['revalidation']['remaining_issues'])}\\n\"\n md+='\\n'\nmd+='## Quality Review\\n\\n'\nmd+=f\"**Overall Quality**: {R['overall_quality']}\\n\\n\"\nif R['concerns']:\n md+='### Concerns\\n\\n'\n for c in R['concerns']:md+=f\"- {c}\\n\"\n md+='\\n'\nif R['recommendations']:\n md+='### Recommendations\\n\\n'\n for r in R['recommendations']:md+=f\"- {r}\\n\"\n md+='\\n'\nmd+='## Evidence Log\\n\\n'\nmd+='This report was generated through the following automated analysis pipeline:\\n\\n'\nmd+='1. **Schema drift detection** - compared actual columns against expected schema\\n'\nmd+='2. **Type error identification** - flagged non-numeric values in numeric columns\\n'\nmd+='3. **Missing value detection** - counted empty/null values per column\\n'\nmd+='4. **Duplicate detection** - identified identical rows\\n'\nmd+='5. **Outlier detection** - applied 3-sigma rule to numeric columns\\n'\nmd+='6. **Automated repair** - fixed types, imputed medians, removed duplicates\\n'\nmd+='7. **Post-repair revalidation** - verified repairs resolved issues\\n'\nmd+='8. **Statistical analysis** - computed sum, mean, min, max per quarter\\n'\nmd+='9. **Quality review** - assessed overall data quality\\n'\nprint(md)"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "gen_report",
+          "output": "report_md"
+        },
+        {
+          "capability": "write_file",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "content": "${report_md}",
+            "path": "report.md"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "write_report",
+          "output": "report_ref"
+        }
+      ],
+      "taskId": "fd3f5a5e-1b0a-4b1e-8c7a-9e2d4f6a8b01"
+    },
+    "initial_parse_error": null,
+    "initial_raw_response": "```json\n{\n  \"id\": \"b8c9d0e1-f2a3-4b5c-6d7e-8f9a0b1c2d3e\",\n  \"taskId\": \"fd3f5a5e-1b0a-4b1e-8c7a-9e2d4f6a8b01\",\n  \"entry\": [\"root\"],\n  \"nodes\": [\n    {\n      \"kind\": \"sequence\",\n      \"nodeId\": \"root\",\n      \"capability\": null,\n      \"output\": null,\n      \"children\": [\"init\", \"process_loop\", \"merge\", \"review\", \"gen_report\", \"write_report\"],\n      \"inputs\": {}\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"init\",\n      \"capability\": \"execute_python\",\n      \"output\": \"file_list\",\n      \"children\": [],\n      \"inputs\": {\n        \"code\": \"import json\\nfiles = ['tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv', 'tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv', 'tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv', 'tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv']\\nprint(json.dumps(files))\"\n      }\n    },\n    {\n      \"kind\": \"loop_map\",\n      \"nodeId\": \"process_loop\",\n      \"capability\": null,\n      \"output\": \"all_results\",\n      \"children\": [\"process_file\"],\n      \"inputs\": {},\n      \"control\": {\n        \"loopSpec\": {\n          \"kind\": \"for_each\",\n          \"input\": \"${file_list}\",\n          \"itemVar\": \"csv_path\"\n        }\n      }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"process_file\",\n      \"capability\": \"execute_python\",\n      \"output\": \"file_result\",\n      \"children\": [],\n      \"inputs\": {\n        \"code\": \"import json,csv,statistics,math\\ncsv_path='${csv_path}'\\nwith open(csv_path,'r') as f:\\n reader=csv.DictReader(f);rows=list(reader);fn=reader.fieldnames or []\\nec=['date','product','quantity','unit_price','total','region']\\nnc=['quantity','unit_price','total']\\nI={'schema_drift':{'detected':False,'unexpected_columns':[],'missing_columns':[]},'type_errors':{'detected':False,'details':[]},'missing_values':{'detected':False,'columns':{}},'duplicates':{'detected':False,'count':0},'outliers':{'detected':False,'details':[]}}\\nes,as_=set(ec),set(fn)\\nif as_!=es:\\n I['schema_drift']['detected']=True;I['schema_drift']['unexpected_columns']=sorted(list(as_-es));I['schema_drift']['missing_columns']=sorted(list(es-as_))\\nfor c in fn:\\n mc=sum(1 for r in rows if not r.get(c) or r.get(c).strip()=='')\\n if mc>0:I['missing_values']['detected']=True;I['missing_values']['columns'][c]=mc\\ns=set()\\nfor r in rows:\\n t=tuple(sorted(r.items()))\\n if t in s:I['duplicates']['detected']=True;I['duplicates']['count']+=1\\n s.add(t)\\nfor c in nc:\\n if c in fn:\\n  vs=[]\\n  for i,r in enumerate(rows):\\n   v=r.get(c,'').strip()\\n   if v:\\n    try:vs.append((i,float(v)))\\n    except ValueError:I['type_errors']['detected']=True;I['type_errors']['details'].append({'row':i,'column':c,'value':v})\\n  if len(vs)>1:\\n   ns=[x[1] for x in vs];mean=sum(ns)/len(ns);std=math.sqrt(sum((n-mean)**2 for n in ns)/len(ns))\\n   if std>0:\\n    for i,fv in vs:\\n     if abs(fv-mean)>3*std:I['outliers']['detected']=True;I['outliers']['details'].append({'row':i,'column':c,'value':fv})\\nRp=[];RR=[dict(r) for r in rows]\\nfor te in I['type_errors']['details']:\\n i,c,v=te['row'],te['column'],te['value']\\n try:RR[i][c]=str(float(v));Rp.append({'action':'type_fixed','row':i,'column':c})\\n except ValueError:RR[i][c]=None;Rp.append({'action':'type_null','row':i,'column':c})\\nfor c in fn:\\n if c in nc:\\n  vs=[float(r[c]) for r in RR if r.get(c) and r[c].strip() and r[c] is not None]\\n  med=statistics.median(vs) if vs else 0\\n  for i,r in enumerate(RR):\\n   if not r.get(c) or r[c].strip()=='' or r[c] is None:RR[i][c]=str(med);Rp.append({'action':'fill_median','row':i,'column':c,'value':med})\\n else:\\n  for i,r in enumerate(RR):\\n   if not r.get(c) or r[c].strip()=='' or r[c] is None:RR[i][c]='UNKNOWN';Rp.append({'action':'fill_unknown','row':i,'column':c})\\nif I['duplicates']['detected']:\\n u=[];s2=set()\\n for r in RR:\\n  t=tuple(sorted(r.items()))\\n  if t not in s2:u.append(r);s2.add(t)\\n Rp.append({'action':'remove_duplicates','removed':len(RR)-len(u)});RR=u\\nRv={'remaining_issues':[],'passed':True}\\nfor c in fn:\\n mc=sum(1 for r in RR if not r.get(c) or r[c].strip()=='' or r[c] is None)\\n if mc>0:Rv['remaining_issues'].append({'type':'missing_values','column':c,'count':mc});Rv['passed']=False\\nfor c in nc:\\n if c in fn:\\n  for i,r in enumerate(RR):\\n   v=r.get(c)\\n   if v and str(v).strip():\\n    try:float(v)\\n    except(ValueError,TypeError):Rv['remaining_issues'].append({'type':'type_error','row':i,'column':c});Rv['passed']=False\\nS={'file':csv_path,'total_rows':len(RR),'columns':fn}\\nfor c in nc:\\n if c in fn:\\n  vs=[]\\n  for r in RR:\\n   try:vs.append(float(r[c]))\\n   except(ValueError,TypeError):pass\\n  if vs:S[c]={'sum':round(sum(vs),2),'mean':round(sum(vs)/len(vs),2),'min':round(min(vs),2),'max':round(max(vs),2),'count':len(vs)}\\nprint(json.dumps({'file':csv_path,'issues':I,'repairs':Rp,'revalidation':Rv,'statistics':S}))\"\n      }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"merge\",\n      \"capability\": \"execute_python\",\n      \"output\": \"merged_data\",\n      \"children\": [],\n      \"inputs\": {\n        \"code\": \"import json\\nAR=${all_results}\\nif isinstance(AR,str):AR=json.loads(AR)\\nP=[json.loads(r) if isinstance(r,str) else r for r in AR]\\nM={'quarters':[],'total_rows':0,'total_issues':0,'total_repairs':0,'all_issues':[],'all_repairs':[],'all_revalidations':[]}\\nfor r in P:\\n M['quarters'].append(r['statistics']);M['total_rows']+=r['statistics']['total_rows']\\n ic=sum(1 for v in r['issues'].values() if isinstance(v,dict) and v.get('detected'));M['total_issues']+=ic\\n M['total_repairs']+=len(r['repairs']);M['all_issues'].append({'file':r['file'],'issues':r['issues']});M['all_repairs'].append({'file':r['file'],'repairs':r['repairs']});M['all_revalidations'].append({'file':r['file'],'revalidation':r['revalidation']})\\nprint(json.dumps(M))\"\n      }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"review\",\n      \"capability\": \"execute_python\",\n      \"output\": \"review_result\",\n      \"children\": [],\n      \"inputs\": {\n        \"code\": \"import json\\nM=${merged_data}\\nif isinstance(M,str):M=json.loads(M)\\nR={'overall_quality':'GOOD','concerns':[],'recommendations':[]}\\nif M['total_issues']>10:R['overall_quality']='FAIR';R['concerns'].append('High number of data quality issues detected')\\nif M['total_repairs']>0:R['recommendations'].append('Review automated repairs for accuracy')\\nfor rv in M['all_revalidations']:\\n if not rv['revalidation']['passed']:R['concerns'].append(rv['file']+': revalidation failed');R['overall_quality']='NEEDS_ATTENTION'\\nprint(json.dumps(R))\"\n      }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"gen_report\",\n      \"capability\": \"execute_python\",\n      \"output\": \"report_md\",\n      \"children\": [],\n      \"inputs\": {\n        \"code\": \"import json\\nM=${merged_data}\\nR=${review_result}\\nif isinstance(M,str):M=json.loads(M)\\nif isinstance(R,str):R=json.loads(R)\\nmd='# Quarterly Sales Data Quality Report\\\\n\\\\n'\\nmd+='## Executive Summary\\\\n\\\\n| Metric | Value |\\\\n|--------|-------|\\\\n'\\nmd+=f\\\"| Quarters Analyzed | {len(M['quarters'])} |\\\\n\\\"\\nmd+=f\\\"| Total Rows | {M['total_rows']} |\\\\n\\\"\\nmd+=f\\\"| Total Issues | {M['total_issues']} |\\\\n\\\"\\nmd+=f\\\"| Total Repairs | {M['total_repairs']} |\\\\n\\\"\\nmd+=f\\\"| Overall Quality | {R['overall_quality']} |\\\\n\\\\n\\\"\\nmd+='## Quarterly Statistics\\\\n\\\\n'\\nfor i,q in enumerate(M['quarters']):\\n md+=f\\\"### Q{i+1}: {q['file']}\\\\n\\\\n\\\"\\n md+=f\\\"- Total rows: {q['total_rows']}\\\\n\\\"\\n for col in ['quantity','unit_price','total']:\\n  if col in q:md+=f\\\"- {col}: sum={q[col]['sum']}, mean={q[col]['mean']}, min={q[col]['min']}, max={q[col]['max']}\\\\n\\\"\\n md+='\\\\n'\\nmd+='## Data Quality Issues\\\\n\\\\n'\\nfor item in M['all_issues']:\\n md+=f\\\"### {item['file']}\\\\n\\\\n\\\"\\n for it,det in item['issues'].items():\\n  if isinstance(det,dict) and det.get('detected'):md+=f\\\"- **{it}**: {json.dumps(det)}\\\\n\\\"\\n md+='\\\\n'\\nmd+='## Repairs Performed\\\\n\\\\n'\\nfor item in M['all_repairs']:\\n md+=f\\\"### {item['file']}\\\\n\\\\n\\\"\\n for rep in item['repairs']:md+=f\\\"- {rep['action']}: {json.dumps(rep)}\\\\n\\\"\\n md+='\\\\n'\\nmd+='## Revalidation Results\\\\n\\\\n'\\nfor item in M['all_revalidations']:\\n md+=f\\\"### {item['file']}\\\\n\\\\n\\\"\\n md+=f\\\"- Passed: {item['revalidation']['passed']}\\\\n\\\"\\n if item['revalidation']['remaining_issues']:md+=f\\\"- Remaining issues: {json.dumps(item['revalidation']['remaining_issues'])}\\\\n\\\"\\n md+='\\\\n'\\nmd+='## Quality Review\\\\n\\\\n'\\nmd+=f\\\"**Overall Quality**: {R['overall_quality']}\\\\n\\\\n\\\"\\nif R['concerns']:\\n md+='### Concerns\\\\n\\\\n'\\n for c in R['concerns']:md+=f\\\"- {c}\\\\n\\\"\\n md+='\\\\n'\\nif R['recommendations']:\\n md+='### Recommendations\\\\n\\\\n'\\n for r in R['recommendations']:md+=f\\\"- {r}\\\\n\\\"\\n md+='\\\\n'\\nmd+='## Evidence Log\\\\n\\\\n'\\nmd+='This report was generated through the following automated analysis pipeline:\\\\n\\\\n'\\nmd+='1. **Schema drift detection** - compared actual columns against expected schema\\\\n'\\nmd+='2. **Type error identification** - flagged non-numeric values in numeric columns\\\\n'\\nmd+='3. **Missing value detection** - counted empty/null values per column\\\\n'\\nmd+='4. **Duplicate detection** - identified identical rows\\\\n'\\nmd+='5. **Outlier detection** - applied 3-sigma rule to numeric columns\\\\n'\\nmd+='6. **Automated repair** - fixed types, imputed medians, removed duplicates\\\\n'\\nmd+='7. **Post-repair revalidation** - verified repairs resolved issues\\\\n'\\nmd+='8. **Statistical analysis** - computed sum, mean, min, max per quarter\\\\n'\\nmd+='9. **Quality review** - assessed overall data quality\\\\n'\\nprint(md)\"\n      }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"write_report\",\n      \"capability\": \"write_file\",\n      \"output\": \"report_ref\",\n      \"children\": [],\n      \"inputs\": {\n        \"path\": \"report.md\",\n        \"content\": \"${report_md}\"\n      }\n    }\n  ],\n  \"effects\": [\n    { \"kind\": \"fs_read\", \"description\": \"read quarterly sales CSV files\", \"reversible\": true },\n    { \"kind\": \"fs_write\", \"description\": \"write consolidated markdown report\", \"reversible\": true },\n    { \"kind\": \"process_spawn\", \"description\": \"execute Python data processing scripts\", \"reversible\": true }\n  ]\n}\n```",
+    "repair_count": 0,
+    "repair_traces": []
+  },
+  "program_metrics": {
+    "capability_types": [
+      "execute_python",
+      "write_file"
+    ],
+    "condition_count": 0,
+    "control_node_count": 1,
+    "loop_count": 1,
+    "node_count": 8,
+    "primitive_count": 6,
+    "retry_count": 0
+  },
+  "repair_tax": {
+    "first_pass_success": true,
+    "repair_attempts_used": 0,
+    "repair_latency_ms": 0
+  },
+  "run": {
+    "compile_success": true,
+    "final_error": null,
+    "model": "LongCat-2.0",
+    "run_index": 3,
+    "timestamp": "2026-09-04T11:31:57Z"
+  },
+  "timing": {
+    "initial_llm_ms": 659187,
+    "repair_llm_ms": 0,
+    "total_compile_ms": 659187,
+    "total_wall_ms": 659463
+  }
+}

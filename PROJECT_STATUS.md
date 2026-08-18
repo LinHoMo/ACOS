@@ -108,12 +108,34 @@
 **三层正确性模型**：L1 Structural Validity → L2 Executability → L3 Task Adequacy
 
 - [x] 实验设计文档（`experiments/p1-5b-cognitive-program-discovery/design.md`）
-- [x] Behavioral Requirements Matrix（`behavioral-requirements.yaml`，7 项行为要求）
+- [x] Behavioral Requirements Matrix（`BEHAVIORAL_REQUIREMENTS.md`，7 项行为要求）
 - [x] 实现 `ModelCompiler::compile_traced()`（捕获完整 LLM trace + 时序）
 - [x] 实现 Discovery Probe 二进制（`cargo run -p acos-cli --bin p1-5b-probe`）
-- [ ] 运行 Discovery Probe（3 runs, LongCat-2.0）
-- [ ] 分析结果，归档报告
-- [ ] 根据结果决定是否需要调整 system prompt
+- [x] **Probe-1 完成**（3 runs, LongCat-2.0）— 命题 B **NOT supported** ✅ FROZEN
+  - L1 Structural Validity: 3/3 (100%)
+  - L2 Executability: 0/3（全部路径幻觉 `/tmp/...`）
+  - L3 Task Adequacy: 0/3
+  - 分析：`experiments/p1-5b-cognitive-program-discovery/analysis.md`
+- [x] **P1-5B-A: Semantic Grounding Prompt + Structured Compile Context**（最小语义对齐修复）
+  - 7 条 Semantic Grounding Rules（编译器契约，非工作流提示）
+  - 扩展 TaskSpec 为结构化 Compile Context（显式 Input Bindings）
+  - 已提交（commit `4ed3f7a`）
+- [x] **Probe-2 完成**（2c/2d 修正后）✅ FROZEN
+  - 完整分析：`experiments/p1-5b-cognitive-program-discovery/probe-2-analysis.md`
+  - 结果：binding 4/4 ×4 runs；BR 5–7/7；compile 4/4；执行 2/4；验证 0/4
+  - 结论：> **Probe-2 支持"Prompt/Context Contract 是 Probe-1 主要混淆变量"的判断；尚不足以单独证明 ModelCompiler 已具备通用 Cognitive Program Discovery 能力。**
+  - 决策：走 **Formal P1-5B**（正式 Discovery Evaluation），不继续无限调 Prompt
+- [x] **Probe-2 结果分析** → 决定走 B or C → **走 A：Formal P1-5B**
+- [ ] **P1-5B Formal Branch** 🔬 IN PROGRESS
+  - 建议纳入：执行失败反馈进 repair 循环、schema 事实入 Compile Context、输出要求接地以改善 L3 验证
+  - 前置工程问题：Generated-code data contract（见 Known Limitation）
+
+**P1-5B 过程中的运行时/编译器修复**（P1-5B-A 之外）：
+- [x] `acos-llm`：`max_tokens` 可配置（`ACOS_LLM_MAX_TOKENS`，默认 32768）— 修复 LongCat-2.0 thinking 吞掉输出预算导致空响应
+- [x] `build_repair_prompt` 携带完整 Compile Context（任务事实，非工作流提示）
+- [x] `NoOpProgram` 校验（零能力图拒绝）+ `UnreachableNodes` 校验（孤儿节点拒绝，P1-5B Probe-2c run-001 案例）
+- [x] Runtime `run_loop` 输出聚合：`loop_map.output` 绑定每次迭代最后一个 child 的输出数组（`cir_spec.md` 已更新）
+- [x] p1-5b-probe：trace 覆盖保护（拒绝覆写已有 run）、BR-7 排除 loop item_var（避免误报）
 
 ## P1 实验方法论
 
@@ -124,7 +146,7 @@ P1 的核心科学问题被拆分为两个独立命题，分别验证：
 | 命题 | 定义 | 验证路径 | 当前状态 |
 |------|------|----------|----------|
 | **A**: 程序化编译 + 可验证执行 > 直接工具调用 | 给定正确的 Cognitive Program，Runtime + Verifier 的执行可靠性高于 LLM 直接调用工具 | RuleCompiler vs Baseline | ✅ 初步支持（P1-R1: 5/5 vs 0/5） |
-| **B**: 编译器能自动发现合理程序结构 | 给定任务描述，ModelCompiler 能生成语义合理的 CIR | ModelCompiler 修复后 vs Ground Truth | ⏳ 待验证 |
+| **B**: 编译器能自动发现合理程序结构 | 给定任务描述，ModelCompiler 能生成语义合理的 CIR | ModelCompiler 修复后 vs Ground Truth | ⏳ Probe-2 支持混淆变量判断，待 Formal Discovery Evaluation |
 
 ### 实验对比矩阵
 
@@ -197,7 +219,8 @@ cargo run -p acos-cli -- run-cir <cir.json> [--env <env.json>] [--verify <ground
 - Baseline 端到端测试需 `LONGCAT_API_KEY`（无 key 时跳过）
 - Baseline 当前使用 flat conversation（非 true multi-turn API），v0.2 足够但长期可改进
 - **ModelCompiler 前端已修复**（P1-5A 完成，FROZEN/PASS）
-- P1-5B Discovery Probe 代码就绪，待运行真实 API 验证命题 B
+- P1-5B Discovery Probe 完成（Probe-1 不支持命题 B；Probe-2 支持"Prompt/Context Contract 是主要混淆变量"的判断，尚不足以单独证明通用 Cognitive Program Discovery；决策走 Formal P1-5B）
+- **Generated-code data contract**：`execute_python` 阶段间无 schema/type 契约（`${all_results}`、`${processed_data}`、key 名、列名假设），`KeyError`/`NameError`/`NoneType.strip` 属此层；作为独立工程问题处理（P1-5B Formal Branch 前置）
 
 ## 第一轮实验结果（P1-R1，已冻结）
 
@@ -221,9 +244,9 @@ ModelCompiler:      0/1 (编译器失败，LLM 返回空/无效输出)
 - [x] 定义 Behavioral Requirements（非结构要求）
 - [x] 实现 compile_traced（Compile Success + Repair Tax + 完整 trace）
 - [x] 实现 Discovery Probe 二进制（3 runs + 执行 + 验证）
-- [ ] 运行 Discovery Probe（`cargo run -p acos-cli --bin p1-5b-probe`）
-- [ ] 分析结果，归档 `probe-results/`
-- [ ] 决定下一步（正式 5-run 实验 or prompt 调整）
+- [x] 运行 Discovery Probe（Probe-1/2/2b/2c/2d，结果归档 `probe-results/`、`probe-2*-results/`）
+- [x] 分析结果（`probe-2-analysis.md`：决策 = Formal P1-5B）
+- [ ] **Formal P1-5B**（正式 Discovery Evaluation；前置：Generated-code data contract 修复）
 
 ### 后续计划
 

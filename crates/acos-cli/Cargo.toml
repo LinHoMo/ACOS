@@ -17,6 +17,7 @@ acos-verify = { path = "../acos-verify" }
 acos-bench = { path = "../acos-bench" }
 acos-baseline = { path = "../acos-baseline" }
 acos-llm = { path = "../acos-llm" }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 

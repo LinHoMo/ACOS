@@ -165,6 +165,16 @@ struct MessagesRequest {
     tools: Option<Vec<ToolDefinition>>,
 }
 
+/// Default maximum output tokens.
+///
+/// P1-5B Probe-2b finding: LongCat-2.0 is a reasoning model that consumes
+/// most of the output budget on `thinking` blocks. With `max_tokens = 4096`
+/// the model hit `stop_reason: max_tokens` with *zero* text for complex
+/// compile tasks (12/12 empty responses in Probe-2b). 16384 helped but is
+/// still occasionally overrun (empty or truncated responses); 32768 leaves
+/// reliable room for thinking + the CIR JSON.
+const DEFAULT_MAX_TOKENS: u32 = 32768;
+
 /// Response body from the Messages API.
 #[derive(Debug, Deserialize)]
 struct MessagesResponse {
@@ -194,12 +204,14 @@ struct ContentBlock {
 /// - `LONGCAT_API_KEY` (or `ANTHROPIC_API_KEY`) — bearer <_REDACTED>
 /// - `LONGCAT_BASE_URL` — defaults to `https://api.longcat.chat/anthropic`
 /// - `ACOS_LLM_MODEL` — defaults to `LongCat-2.0`
+/// - `ACOS_LLM_MAX_TOKENS` — max output tokens, defaults to 16384
 #[derive(Debug, Clone)]
 pub struct LongCatClient {
     http: reqwest::Client,
     api_key: String,
     base_url: String,
     model: String,
+    max_tokens: u32,
 }
 
 impl LongCatClient {
@@ -220,11 +232,17 @@ impl LongCatClient {
         let model =
             std::env::var("ACOS_LLM_MODEL").unwrap_or_else(|_| "LongCat-2.0".into());
 
+        let max_tokens = std::env::var("ACOS_LLM_MAX_TOKENS")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(DEFAULT_MAX_TOKENS);
+
         Ok(Self {
             http: reqwest::Client::new(),
             api_key,
             base_url,
             model,
+            max_tokens,
         })
     }
 
@@ -236,6 +254,7 @@ impl LongCatClient {
             api_key: String::new(),
             base_url: "http://127.0.0.1:1".into(),
             model: "dummy".into(),
+            max_tokens: DEFAULT_MAX_TOKENS,
         }
     }
 
@@ -268,7 +287,7 @@ impl LongCatClient {
     ) -> Result<ChatResponse, AcosError> {
         let req = MessagesRequest {
             model: self.model.clone(),
-            max_tokens: 4096,
+            max_tokens: self.max_tokens,
             system: system.to_string(),
             messages: messages.to_vec(),
             tools: tools.map(|t| t.to_vec()),
