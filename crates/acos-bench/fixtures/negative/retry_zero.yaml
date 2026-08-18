@@ -1,0 +1,27 @@
+id: negative_retry_zero
+mode: cir
+goal: "retry with max_attempts 0 must be rejected"
+cir:
+  id: "00000000-0000-0000-0000-0000000000d1"
+  taskId: "00000000-0000-0000-0000-0000000000d2"
+  entry:
+    - "A"
+  effects: []
+  nodes:
+    - nodeId: "A"
+      kind: primitive_invocation
+      capability: search
+      output: results
+      children: []
+      inputs:
+        query: "acos"
+      control:
+        retry:
+          maxAttempts: 0
+          strategy: fixed
+          retryOn:
+            - timeout
+          backoffMs: 1
+expected:
+  compile: false
+  validation: "max_attempts"

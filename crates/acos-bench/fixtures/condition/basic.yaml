@@ -1,0 +1,37 @@
+id: condition_basic
+mode: cir
+goal: "search, then summarize when results exist"
+cir:
+  id: "00000000-0000-0000-0000-000000000001"
+  taskId: "00000000-0000-0000-0000-00000000000a"
+  entry:
+    - "A"
+    - "B"
+  effects: []
+  nodes:
+    - nodeId: "A"
+      kind: primitive_invocation
+      capability: search
+      output: search_results
+      children: []
+      inputs:
+        query: "acos"
+    - nodeId: "B"
+      kind: conditional
+      children:
+        - "C"
+      elseChildren: []
+      inputs: {}
+      control:
+        condition:
+          expression: "exists(search_results)"
+    - nodeId: "C"
+      kind: primitive_invocation
+      capability: summarize
+      output: summary
+      children: []
+      inputs:
+        text: "{$search_results}"
+expected:
+  execution: true
+  final_status: success

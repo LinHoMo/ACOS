@@ -1,0 +1,20 @@
+id: recovery_model_replan
+mode: cir
+goal: "unknown-class failure is delegated to the model replanner"
+cir:
+  id: "00000000-0000-0000-0000-0000000000b1"
+  taskId: "00000000-0000-0000-0000-0000000000b2"
+  entry:
+    - "A"
+  effects: []
+  nodes:
+    - nodeId: "A"
+      kind: primitive_invocation
+      capability: unstable_search
+      output: results
+      children: []
+      inputs:
+        query: "acos"
+expected:
+  recovery: model
+  execution: true

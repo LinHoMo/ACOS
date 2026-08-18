@@ -1,0 +1,46 @@
+id: condition_repair_branch
+mode: cir
+goal: "take the else branch and write a marker file"
+cir:
+  id: "00000000-0000-0000-0000-000000000002"
+  taskId: "00000000-0000-0000-0000-00000000000b"
+  entry:
+    - "A"
+    - "B"
+  effects: []
+  nodes:
+    - nodeId: "A"
+      kind: primitive_invocation
+      capability: write_file
+      output: marker
+      children: []
+      inputs:
+        path: "{workspace}/marker.txt"
+        content: "repair"
+    - nodeId: "B"
+      kind: conditional
+      children:
+        - "C"
+      elseChildren:
+        - "D"
+      inputs: {}
+      control:
+        condition:
+          expression: "1 == 2"
+    - nodeId: "C"
+      kind: primitive_invocation
+      capability: summarize
+      output: summary2
+      children: []
+      inputs:
+        text: "then-branch"
+    - nodeId: "D"
+      kind: primitive_invocation
+      capability: write_file
+      output: marker2
+      children: []
+      inputs:
+        path: "{workspace}/else.txt"
+        content: "else-branch"
+expected:
+  execution: true

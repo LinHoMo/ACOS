@@ -1,0 +1,25 @@
+id: recovery_rule_replan
+mode: cir
+goal: "timeout on search falls back to local read via the rule replanner"
+cir:
+  id: "00000000-0000-0000-0000-0000000000a1"
+  taskId: "00000000-0000-0000-0000-0000000000a2"
+  entry:
+    - "search"
+  effects:
+    - kind: fs_read
+      description: "local fallback read"
+      reversible: true
+  nodes:
+    - nodeId: "search"
+      kind: primitive_invocation
+      capability: flaky_search
+      output: results
+      children: []
+      inputs:
+        query: "acos"
+files:
+  fallback.txt: "static answer"
+expected:
+  recovery: rule
+  execution: true

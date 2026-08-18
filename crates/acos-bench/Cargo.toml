@@ -1,11 +1,11 @@
 [package]
-name = "acos-cli"
+name = "acos-bench"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "ACOS command-line interface."
+description = "ACOS benchmark harness: fixtures-as-contracts regression suite."
 
 [dependencies]
 acos-core = { path = "../acos-core" }
@@ -14,14 +14,17 @@ acos-runtime = { path = "../acos-runtime" }
 acos-state = { path = "../acos-state" }
 acos-plugin = { path = "../acos-plugin" }
 acos-verify = { path = "../acos-verify" }
-acos-bench = { path = "../acos-bench" }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+serde_yaml = "0.9"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs"] }
+uuid = { version = "1", features = ["v4"] }
 
 [features]
 default = ["in-memory"]
 in-memory = ["acos-runtime/in-memory", "acos-state/in-memory", "acos-plugin/in-memory", "acos-verify/in-memory"]
 
 [[bin]]
-name = "acos"
+name = "acos-bench"
 path = "src/main.rs"

@@ -1,0 +1,23 @@
+id: negative_loop_no_max
+mode: cir
+goal: "while loop without max_iterations must be rejected"
+cir:
+  id: "00000000-0000-0000-0000-0000000000c1"
+  taskId: "00000000-0000-0000-0000-0000000000c2"
+  entry:
+    - "A"
+  effects: []
+  nodes:
+    - nodeId: "A"
+      kind: loop_map
+      children: []
+      elseChildren: []
+      inputs: {}
+      control:
+        loopSpec:
+          kind: while
+          condition: "1 == 1"
+          maxIterations: null
+expected:
+  compile: false
+  validation: "max_iterations"

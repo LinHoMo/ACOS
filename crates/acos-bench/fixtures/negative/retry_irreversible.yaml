@@ -1,0 +1,26 @@
+id: negative_retry_irreversible
+mode: cir
+goal: "retry on an irreversible primitive must be rejected"
+cir:
+  id: "00000000-0000-0000-0000-0000000000e1"
+  taskId: "00000000-0000-0000-0000-0000000000e2"
+  entry:
+    - "A"
+  effects: []
+  nodes:
+    - nodeId: "A"
+      kind: primitive_invocation
+      capability: irreversible
+      output: done
+      children: []
+      inputs: {}
+      control:
+        retry:
+          maxAttempts: 2
+          strategy: fixed
+          retryOn:
+            - timeout
+          backoffMs: 1
+expected:
+  compile: false
+  validation: "irreversible"

@@ -1,0 +1,26 @@
+id: retry_timeout
+mode: cir
+goal: "transient search failure is retried"
+cir:
+  id: "00000000-0000-0000-0000-000000000005"
+  taskId: "00000000-0000-0000-0000-00000000000e"
+  entry:
+    - "A"
+  effects: []
+  nodes:
+    - nodeId: "A"
+      kind: primitive_invocation
+      capability: flaky_search
+      output: results
+      children: []
+      inputs: {}
+      control:
+        retry:
+          maxAttempts: 3
+          backoffMs: 5
+          strategy: fixed
+          retryOn:
+            - timeout
+expected:
+  recovery: retry
+  execution: true

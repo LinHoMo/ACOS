@@ -1,0 +1,39 @@
+id: loop_while_limit
+mode: cir
+goal: "a while loop that must terminate via max_iterations"
+cir:
+  id: "00000000-0000-0000-0000-000000000004"
+  taskId: "00000000-0000-0000-0000-00000000000d"
+  entry:
+    - "init"
+    - "loop"
+  effects: []
+  nodes:
+    - nodeId: "init"
+      kind: primitive_invocation
+      capability: summarize
+      output: out
+      children: []
+      inputs:
+        text: "seed"
+    - nodeId: "loop"
+      kind: loop_map
+      children:
+        - "body"
+      elseChildren: []
+      inputs: {}
+      control:
+        loopSpec:
+          kind: while
+          condition: "1 == 1"
+          maxIterations: 2
+    - nodeId: "body"
+      kind: primitive_invocation
+      capability: summarize
+      output: out
+      children: []
+      inputs:
+        text: "{$out}"
+expected:
+  execution: false
+  final_status: failed

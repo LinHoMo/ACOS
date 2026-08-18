@@ -9,7 +9,12 @@
 //!     (or `ANTHROPIC_API_KEY`) to enable. Configure the model with
 //!     `ACOS_LLM_MODEL` (default `claude-sonnet-4-5-20250929`).
 //!   - Fallback: `--rules` flag forces the deterministic `RuleCompiler`.
+//!
+//! Benchmark harness:
+//!   acos bench [--suite S] [--case C] [--require-model] [--fixtures DIR]
+//!     Runs the fixtures-as-contracts regression suite (see `acos_bench`).
 
+use acos_bench::{run, BenchArgs};
 use acos_compiler::{ModelCompiler, RuleCompiler};
 use acos_core::error::AcosError;
 use acos_core::schema::from_yaml;
@@ -18,6 +23,7 @@ use acos_core::types::TaskSpec;
 use acos_runtime::Runtime;
 use acos_state::InMemoryStore;
 use acos_verify::verify_run;
+use std::path::PathBuf;
 
 #[tokio::main]
 async fn main() -> Result<(), AcosError> {
@@ -25,7 +31,52 @@ async fn main() -> Result<(), AcosError> {
     let use_rules = args.iter().any(|a| a == "--rules");
     let positional: Vec<&str> = args.iter().filter(|a| !a.starts_with('-')).map(String::as_str).collect();
 
-    match positional.get(1).map(|s| *s) {
+    match positional.get(1).copied() {
+        Some("bench") => {
+            // acos bench [--suite S] [--case C] [--require-model] [--fixtures DIR]
+            let mut suite: Option<String> = None;
+            let mut case: Option<String> = None;
+            let mut require_model = false;
+            let mut fixtures_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            fixtures_dir.push("../acos-bench/fixtures");
+            let mut i = 2;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--suite" => {
+                        suite = args.get(i + 1).cloned();
+                        i += 1;
+                    }
+                    "--case" => {
+                        case = args.get(i + 1).cloned();
+                        i += 1;
+                    }
+                    "--fixtures" => {
+                        if let Some(p) = args.get(i + 1) {
+                            fixtures_dir = PathBuf::from(p);
+                        }
+                        i += 1;
+                    }
+                    "--require-model" => require_model = true,
+                    other => {
+                        eprintln!(
+                            "usage: acos bench [--suite S] [--case C] [--require-model] [--fixtures DIR]"
+                        );
+                        eprintln!("unknown argument: {other}");
+                        std::process::exit(2);
+                    }
+                }
+                i += 1;
+            }
+            let report = run(BenchArgs {
+                fixtures_dir,
+                suite,
+                case,
+                require_model,
+            })
+            .await;
+            report.print();
+            std::process::exit(if report.failed() == 0 { 0 } else { 1 });
+        }
         Some("compile") => {
             let path = positional.get(2).expect("usage: acos compile <task.yaml>");
             let task = read_task(path).await?;
@@ -65,7 +116,7 @@ async fn main() -> Result<(), AcosError> {
             Ok(())
         }
         _ => {
-            eprintln!("usage: acos <compile|run> <task.yaml> [--rules]");
+            eprintln!("usage: acos <compile|run|bench> <task.yaml> [--rules]");
             std::process::exit(1);
         }
     }

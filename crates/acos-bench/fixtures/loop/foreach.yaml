@@ -1,0 +1,37 @@
+id: loop_foreach
+mode: cir
+goal: "summarize each list item"
+cir:
+  id: "00000000-0000-0000-0000-000000000003"
+  taskId: "00000000-0000-0000-0000-00000000000c"
+  entry:
+    - "src"
+    - "loop"
+  effects: []
+  nodes:
+    - nodeId: "src"
+      kind: primitive_invocation
+      capability: list_source
+      output: items
+      children: []
+      inputs: {}
+    - nodeId: "loop"
+      kind: loop_map
+      children:
+        - "body"
+      elseChildren: []
+      inputs: {}
+      control:
+        loopSpec:
+          kind: for_each
+          input: "${items}"
+          itemVar: item
+    - nodeId: "body"
+      kind: primitive_invocation
+      capability: summarize
+      output: per_item
+      children: []
+      inputs:
+        text: "{$item}"
+expected:
+  execution: true
