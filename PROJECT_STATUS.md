@@ -75,15 +75,22 @@
 - [ ] 使用相同 flagship 任务 + 相同验证器
 - [ ] 对比 ACOS vs 手写脚本
 
-### P1-5A ModelCompiler Frontend Robustness ⬜
+### P1-5A ModelCompiler Frontend Robustness ✅ 实现完成，待 live smoke test
 
 > **目标**：让 ModelCompiler 成为一个可靠的编译器前端，能处理 LLM 的各种异常输出。
 
-- [ ] 错误分类体系（JsonSyntaxError / MissingRequiredField / UnknownCapability / InvalidReference / InvalidControlSemantics / InvalidEffect）
-- [ ] Repair Prompt 机制（把具体 validator error 反馈给模型重试）
-- [ ] 重试状态机（JSON 提取 → Schema 校验 → CIR 验证 → Repair → 最多 2-3 次）
-- [ ] Compiler Robustness Suite（至少 9 个测试用例覆盖各类错误）
-- [ ] 明确 CompilerFailure（无法修复时给出诊断信息）
+- [x] 错误分类体系（JsonSyntaxError / MissingRequiredField / UnknownCapability / InvalidReference / InvalidControlSemantics / InvalidEffect）
+- [x] Repair Prompt 机制（把具体 validator error 反馈给模型重试）
+- [x] 重试状态机（JSON 提取 → Schema 校验 → CIR 验证 → Repair → 最多 3 次）
+- [x] Compiler Robustness Suite（9 个测试用例覆盖各类错误 + 6 个语义验证测试）
+- [x] 明确 CompilerFailure（RepairExhausted 包含完整诊断链）
+- [ ] **下一步**：用真实 LONGCAT_API_KEY 做 live smoke test（3 个 case：S1 合法 / S2 控制流 / S3 复杂）
+
+**验收线**：
+- 合法输出 → 接受
+- 可修复错误 → Repair → Validate → 成功
+- 不可修复错误 → 有界重试 → 明确 CompilerFailure
+- 任何情况不允许 panic / 无限重试 / 绕过 Validator
 
 ### P1-5B Cognitive Program Discovery ⬜
 
@@ -194,12 +201,12 @@ ModelCompiler:      0/1 (编译器失败，LLM 返回空/无效输出)
 
 ## 尚未开始 / Not yet started
 
-### 当前优先级：P1-5A ModelCompiler Frontend Robustness
+### 当前优先级：P1-5A Live Smoke Test
 
-- [ ] 实现错误分类体系（6 类错误）
-- [ ] 实现 Repair Prompt + 重试状态机
-- [ ] 编写 Compiler Robustness Suite（9+ 测试用例）
-- [ ] 验证通过后进入 P1-5B
+- [ ] 用真实 LONGCAT_API_KEY 跑 3 个 smoke case（S1 合法 / S2 控制流 / S3 复杂）
+- [ ] 记录首次成功率、Repair 触发率、平均 Repair 次数
+- [ ] 保存每次 raw_response + diagnostics + final CIR
+- [ ] 通过后冻结 P1-5A，进入 P1-5B
 
 ### 后续计划
 
