@@ -1,0 +1,118 @@
+{
+  "input": {
+    "prompt_sent": "Compile the following ACOS task into a CIR execution graph.\n\n```json\n{\n  \"apiVersion\": \"acos.io/v1\",\n  \"id\": \"fd3f5a5e-1b0a-4b1e-8c7a-9e2d4f6a8b01\",\n  \"goal\": \"Analyze all quarterly sales CSV files in the dataset directory. For each file: detect data-quality issues (schema drift, type errors, missing values, duplicates, outliers); repair recoverable issues; revalidate repaired inputs; compute quarterly statistics; merge results; run a quality review; and generate a consolidated Markdown report with an evidence log.\",\n  \"inputs\": [\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv\",\n      \"format\": \"csv\"\n    },\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv\",\n      \"format\": \"csv\"\n    },\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv\",\n      \"format\": \"csv\"\n    },\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv\",\n      \"format\": \"csv\"\n    }\n  ],\n  \"outputs\": [\n    {\n      \"type\": \"Report\",\n      \"format\": \"markdown\"\n    }\n  ],\n  \"constraints\": {\n    \"timeoutSeconds\": null,\n    \"maxCost\": null,\n    \"allowedNetwork\": null\n  },\n  \"optimization\": {\n    \"primary\": \"reliability\",\n    \"secondary\": \"cost\"\n  },\n  \"approval\": {\n    \"externalSideEffects\": \"required\"\n  }\n}\n```",
+    "task_spec_path": "tests/benchmarks/p1/flagship_csv_quality/acos_task.yaml"
+  },
+  "output": {
+    "final_cir": {
+      "effects": [
+        {
+          "description": "read input file",
+          "kind": "fs_read",
+          "reversible": true
+        },
+        {
+          "description": "write report file",
+          "kind": "fs_write",
+          "reversible": true
+        }
+      ],
+      "entry": [
+        "root"
+      ],
+      "id": "cbdac4ba-9b7a-4cb5-ae2d-a68cb7aabdb7",
+      "nodes": [
+        {
+          "capability": null,
+          "children": [
+            "step_0",
+            "step_1",
+            "step_2"
+          ],
+          "elseChildren": [],
+          "inputs": {},
+          "kind": "sequence",
+          "nodeId": "root",
+          "output": null
+        },
+        {
+          "capability": "read_file",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "path": "/tmp/input.txt"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "step_0",
+          "output": "raw_doc"
+        },
+        {
+          "capability": "summarize",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "document": "${raw_doc}"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "step_1",
+          "output": "summary"
+        },
+        {
+          "capability": "write_file",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "content": "${summary}",
+            "path": "/tmp/report.md"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "step_2",
+          "output": "report_ref"
+        }
+      ],
+      "taskId": "fd3f5a5e-1b0a-4b1e-8c7a-9e2d4f6a8b01"
+    },
+    "initial_parse_error": "JSON syntax error: EOF while parsing a value at line 1 column 0",
+    "initial_raw_response": "",
+    "repair_count": 1,
+    "repair_traces": [
+      {
+        "attempt": 1,
+        "prompt": "Your previous output failed CIR validation.\n\nError type: CompilerError\nDetails: JSON syntax error: EOF while parsing a value at line 1 column 0\n\nOriginal output excerpt:\n```\n\n```\n\nPlease analyze the error and return a corrected CIR JSON.\nRespond with ONLY the corrected JSON, no commentary.",
+        "raw_response": "{\n  \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n  \"taskId\": \"b2c3d4e5-f6a7-8901-bcde-f12345678901\",\n  \"entry\": [\"root\"],\n  \"nodes\": [\n    {\n      \"kind\": \"sequence\",\n      \"nodeId\": \"root\",\n      \"capability\": null,\n      \"output\": null,\n      \"children\": [\"step_0\", \"step_1\", \"step_2\"],\n      \"inputs\": {}\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"step_0\",\n      \"capability\": \"read_file\",\n      \"output\": \"raw_doc\",\n      \"children\": [],\n      \"inputs\": {\n        \"path\": \"/tmp/input.txt\"\n      }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"step_1\",\n      \"capability\": \"summarize\",\n      \"output\": \"summary\",\n      \"children\": [],\n      \"inputs\": {\n        \"document\": \"${raw_doc}\"\n      }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"step_2\",\n      \"capability\": \"write_file\",\n      \"output\": \"report_ref\",\n      \"children\": [],\n      \"inputs\": {\n        \"path\": \"/tmp/report.md\",\n        \"content\": \"${summary}\"\n      }\n    }\n  ],\n  \"effects\": [\n    {\n      \"kind\": \"fs_read\",\n      \"description\": \"read input file\",\n      \"reversible\": true\n    },\n    {\n      \"kind\": \"fs_write\",\n      \"description\": \"write report file\",\n      \"reversible\": true\n    }\n  ]\n}",
+        "validation_error": null
+      }
+    ]
+  },
+  "program_metrics": {
+    "capability_types": [
+      "read_file",
+      "summarize",
+      "write_file"
+    ],
+    "condition_count": 0,
+    "control_node_count": 0,
+    "loop_count": 0,
+    "node_count": 4,
+    "primitive_count": 3,
+    "retry_count": 0
+  },
+  "repair_tax": {
+    "first_pass_success": false,
+    "repair_attempts_used": 1,
+    "repair_latency_ms": 43938
+  },
+  "run": {
+    "compile_success": true,
+    "final_error": null,
+    "model": "LongCat-2.0",
+    "run_index": 2,
+    "timestamp": "2026-09-04T05:17:03Z"
+  },
+  "timing": {
+    "initial_llm_ms": 99964,
+    "repair_llm_ms": 43938,
+    "total_compile_ms": 143902,
+    "total_wall_ms": 143903
+  }
+}
