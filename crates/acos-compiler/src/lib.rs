@@ -22,7 +22,7 @@ use acos_core::error::AcosError;
 use acos_core::id::{ProgramId, TaskId};
 use acos_core::traits::{CompileResult, Compiler, Diagnostic, DiagnosticLevel};
 use acos_core::types::{
-    CirNode, CirNodeKind, CirProgram, EffectDecl, EffectKind, LoopKind, TaskSpec,
+    CirNode, CirNodeKind, CirProgram, EffectDecl, EffectKind, LoopKind, OutputSpec, TaskSpec,
 };
 
 pub mod replan;
@@ -227,8 +227,8 @@ You MUST respond with **only valid JSON** (no markdown, no commentary) matching 
   "entry": ["root"],
   "nodes": [
     { "kind": "sequence", "nodeId": "root", "capability": null, "output": null, "children": ["step_0"], "inputs": {} },
-    { "kind": "primitive_invocation", "nodeId": "step_0", "capability": "read_file", "output": "raw_0", "children": [], "inputs": { "path": "/absolute/path/to/file" } },
-    { "kind": "primitive_invocation", "nodeId": "step_1", "capability": "write_file", "output": "report_ref", "children": [], "inputs": { "path": "report.md", "content": "${raw_0}" } }
+    { "kind": "primitive_invocation", "nodeId": "step_0", "capability": "read_file", "output": { "name": "raw_0", "typeName": "String", "fields": [] }, "children": [], "inputs": { "path": "/absolute/path/to/file" } },
+    { "kind": "primitive_invocation", "nodeId": "step_1", "capability": "write_file", "output": { "name": "report_ref", "typeName": "String", "fields": [] }, "children": [], "inputs": { "path": "report.md", "content": "${raw_0}" } }
   ],
   "effects": [
     { "kind": "fs_read", "description": "read input files", "reversible": true },
@@ -239,7 +239,7 @@ You MUST respond with **only valid JSON** (no markdown, no commentary) matching 
 
 # Structural Rules
 
-1. `nodes` is an array. Each node has: `kind`, `node_id`, `capability` (null for containers), `output` (null unless it binds a value), `children`, `inputs`.
+1. `nodes` is an array. Each node has: `kind`, `node_id`, `capability` (null for containers), `output` (null unless it binds a value; when bound: `{ "name": "<binding>", "typeName": "<type>", "fields": [...] }`), `children`, `inputs`.
 2. `kind` must be exactly one of: `sequence`, `parallel`, `conditional`, `loop_map`, `primitive_invocation`.
 3. A top-level `sequence` container whose `children` list is the execution order is required; put its id in `entry`.
 4. Use `primitive_invocation` for every primitive call. Set `capability` to the primitive name.
@@ -764,7 +764,12 @@ impl Compiler for RuleCompiler {
                 kind: CirNodeKind::PrimitiveInvocation,
                 node_id,
                 capability: Some("read_file".to_string()),
-                output: Some(format!("raw_{i}")),
+                output: Some(OutputSpec {
+                    name: format!("raw_{i}"),
+                    type_name: "String".into(),
+                    fields: vec![],
+                }),
+                input_types: HashMap::new(),
                 children: vec![],
                 else_children: vec![],
                 inputs: vec![("path".to_string(), serde_json::Value::String(input.path.clone()))]
@@ -779,6 +784,7 @@ impl Compiler for RuleCompiler {
             node_id: read_parallel_id.to_string(),
             capability: None,
             output: None,
+            input_types: HashMap::new(),
             children: read_children.clone(),
             else_children: vec![],
             inputs: HashMap::new(),
@@ -794,7 +800,12 @@ impl Compiler for RuleCompiler {
             kind: CirNodeKind::PrimitiveInvocation,
             node_id: summarize_id.to_string(),
             capability: Some("summarize".to_string()),
-            output: Some("report_text".to_string()),
+            output: Some(OutputSpec {
+                name: "report_text".to_string(),
+                type_name: "String".into(),
+                fields: vec![],
+            }),
+            input_types: HashMap::new(),
             children: vec![],
             else_children: vec![],
             inputs: vec![(
@@ -812,7 +823,12 @@ impl Compiler for RuleCompiler {
             kind: CirNodeKind::PrimitiveInvocation,
             node_id: write_id.to_string(),
             capability: Some("write_file".to_string()),
-            output: Some("report_ref".to_string()),
+            output: Some(OutputSpec {
+                name: "report_ref".to_string(),
+                type_name: "String".into(),
+                fields: vec![],
+            }),
+            input_types: HashMap::new(),
             children: vec![],
             else_children: vec![],
             inputs: vec![
@@ -831,6 +847,7 @@ impl Compiler for RuleCompiler {
             node_id: root_id.to_string(),
             capability: None,
             output: None,
+            input_types: HashMap::new(),
             children: vec![
                 read_parallel_id.to_string(),
                 summarize_id.to_string(),
@@ -1036,7 +1053,7 @@ fn validate_control_semantics_detailed(program: &CirProgram) -> Result<(), Compi
     let outputs: std::collections::HashSet<&str> = program
         .nodes
         .iter()
-        .filter_map(|n| n.output.as_deref())
+        .filter_map(|n| n.output.as_ref().map(|o| o.name.as_str()))
         .collect();
 
     for node in &program.nodes {
@@ -1231,7 +1248,7 @@ mod tests {
             "entry": ["root"],
             "nodes": [
                 {"kind": "sequence", "nodeId": "root", "capability": null, "output": null, "children": ["step_0"], "inputs": {}},
-                {"kind": "primitive_invocation", "nodeId": "step_0", "capability": "read_file", "output": "raw_0", "children": [], "inputs": {"path": "/tmp/test.txt"}}
+                {"kind": "primitive_invocation", "nodeId": "step_0", "capability": "read_file", "output": {"name": "raw_0", "typeName": "String", "fields": []}, "children": [], "inputs": {"path": "/tmp/test.txt"}}
             ],
             "effects": [
                 {"kind": "fs_read", "description": "read file", "reversible": true}
@@ -1319,7 +1336,7 @@ mod tests {
             "entry": ["root"],
             "nodes": [
                 {"kind": "sequence", "nodeId": "root", "capability": null, "output": null, "children": ["step_0"], "inputs": {}},
-                {"kind": "primitive_invocation", "nodeId": "step_0", "capability": "teleport", "output": "x", "children": [], "inputs": {}}
+                {"kind": "primitive_invocation", "nodeId": "step_0", "capability": "teleport", "output": {"name": "x", "typeName": "String", "fields": []}, "children": [], "inputs": {}}
             ],
             "effects": []
         }"#;
@@ -1379,6 +1396,7 @@ mod tests {
             node_id: "loop".into(),
             capability: None,
             output: None,
+            input_types: HashMap::new(),
             children: vec![],
             else_children: vec![],
             inputs: HashMap::new(),
@@ -1412,6 +1430,7 @@ mod tests {
             node_id: "p".into(),
             capability: Some("read_file".into()),
             output: None,
+            input_types: HashMap::new(),
             children: vec![],
             else_children: vec![],
             inputs: HashMap::new(),
@@ -1444,6 +1463,7 @@ mod tests {
             node_id: "p".into(),
             capability: Some("read_file".into()),
             output: None,
+            input_types: HashMap::new(),
             children: vec![],
             else_children: vec!["x".into()],
             inputs: HashMap::new(),
@@ -1466,7 +1486,12 @@ mod tests {
             kind: CirNodeKind::PrimitiveInvocation,
             node_id: "search".into(),
             capability: Some("search".into()),
-            output: Some("out_search".into()),
+            output: Some(OutputSpec {
+                name: "out_search".into(),
+                type_name: "String".into(),
+                fields: vec![],
+            }),
+            input_types: HashMap::new(),
             children: vec![],
             else_children: vec![],
             inputs: HashMap::new(),
@@ -1477,6 +1502,7 @@ mod tests {
             node_id: "then".into(),
             capability: Some("read_file".into()),
             output: None,
+            input_types: HashMap::new(),
             children: vec![],
             else_children: vec![],
             inputs: HashMap::new(),
@@ -1487,6 +1513,7 @@ mod tests {
             node_id: "check".into(),
             capability: None,
             output: None,
+            input_types: HashMap::new(),
             children: vec!["then".into()],
             else_children: vec![],
             inputs: HashMap::new(),
@@ -1514,7 +1541,12 @@ mod tests {
             kind: CirNodeKind::PrimitiveInvocation,
             node_id: "search".into(),
             capability: Some("search".into()),
-            output: Some("out_search".into()),
+            output: Some(OutputSpec {
+                name: "out_search".into(),
+                type_name: "String".into(),
+                fields: vec![],
+            }),
+            input_types: HashMap::new(),
             children: vec![],
             else_children: vec![],
             inputs: HashMap::new(),
@@ -1525,6 +1557,7 @@ mod tests {
             node_id: "check".into(),
             capability: None,
             output: None,
+            input_types: HashMap::new(),
             children: vec![],
             else_children: vec![],
             inputs: HashMap::new(),
@@ -1554,6 +1587,7 @@ mod tests {
             node_id: "root".into(),
             capability: None,
             output: None,
+            input_types: HashMap::new(),
             children: vec![],
             else_children: vec![],
             inputs: HashMap::new(),
@@ -1580,7 +1614,12 @@ mod tests {
             kind: CirNodeKind::PrimitiveInvocation,
             node_id: "run".into(),
             capability: Some("execute_python".into()),
-            output: Some("result".into()),
+            output: Some(OutputSpec {
+                name: "result".into(),
+                type_name: "String".into(),
+                fields: vec![],
+            }),
+            input_types: HashMap::new(),
             children: vec![],
             else_children: vec![],
             inputs: HashMap::new(),
@@ -1595,6 +1634,7 @@ mod tests {
             node_id: "write_report".into(),
             capability: Some("write_file".into()),
             output: None,
+            input_types: HashMap::new(),
             children: vec![],
             else_children: vec![],
             inputs: HashMap::new(),

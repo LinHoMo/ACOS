@@ -91,7 +91,7 @@ impl ModelReplanner for ModelRecoveryPlanner {
 mod tests {
     use super::*;
     use acos_core::id::RunId;
-    use acos_core::types::{CirNode, CirNodeKind, FailureClass};
+    use acos_core::types::{CirNode, CirNodeKind, FailureClass, OutputSpec};
 
     fn failure() -> FailureContext {
         FailureContext {
@@ -110,7 +110,7 @@ mod tests {
             "replaceNode": "B",
             "reason": "use a local read instead",
             "subgraph": [
-                { "kind": "primitive_invocation", "nodeId": "B", "capability": "read_file", "output": "results", "children": [], "inputs": { "path": "fallback.txt" } }
+                { "kind": "primitive_invocation", "nodeId": "B", "capability": "read_file", "output": { "name": "results", "typeName": "String", "fields": [] }, "children": [], "inputs": { "path": "fallback.txt" } }
             ]
         }"#;
         let planner = ModelRecoveryPlanner {
@@ -153,7 +153,12 @@ mod tests {
                 kind: CirNodeKind::PrimitiveInvocation,
                 node_id: "B".into(),
                 capability: Some("search".into()),
-                output: Some("results".into()),
+                output: Some(OutputSpec {
+                    name: "results".into(),
+                    type_name: "String".into(),
+                    fields: vec![],
+                }),
+                input_types: std::collections::HashMap::new(),
                 children: vec![],
                 else_children: vec![],
                 inputs: Default::default(),
