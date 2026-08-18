@@ -11,6 +11,9 @@ description = "ACOS verification pipeline: checks program and run correctness."
 acos-core = { path = "../acos-core" }
 acos-state = { path = "../acos-state" }
 async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1"
 
 [features]
 default = ["in-memory"]

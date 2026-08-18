@@ -1,0 +1,142 @@
+# P1 Flagship CSV Quality — Ground Truth
+#
+# All values are deterministic computed from raw CSV files.
+# NO approximation, NO LLM judgment. Pure numeric facts.
+#
+# Usage: Semantic Checker compares report claims against these values.
+
+meta:
+  task: flagship_csv_quality
+  version: "0.1"
+  computed_at: "2025-08-18"
+
+# Per-file deterministic statistics
+files:
+  sales_q1.csv:
+    display_name: "Q1 Sales"
+    # Raw stats
+    raw_row_count: 7
+    column_count: 5
+    columns: ["date", "product", "category", "units", "revenue"]
+    # Revenue (sum of 'revenue' column)
+    total_revenue: 33850.00
+    total_units: 665
+    # Quality flags
+    has_duplicates: false
+    has_missing_values: false
+    has_negative_values: false
+    has_outliers: false
+    has_column_drift: false
+    has_currency_format: false
+    # Categories in file
+    categories: ["Electronics", "Home", "Services"]
+    # Issue summary
+    issue_count: 0
+    issues: []
+
+  sales_q2.csv:
+    display_name: "Q2 Sales"
+    # Raw stats (before cleaning)
+    raw_row_count: 7
+    column_count: 5
+    columns: ["transaction_date", "item_name", "item_category", "quantity", "sales"]
+    # Revenue sum (cleaned: $, → stripped, NA treated as 0 for sum only)
+    total_revenue: 24250.00
+    # Quality flags
+    has_duplicates: false
+    has_missing_values: true    # NA, empty cells
+    has_negative_values: false
+    has_outliers: false
+    has_column_drift: true      # date→transaction_date, product→item_name, etc.
+    has_currency_format: true    # $4,200.00 format
+    # Issues found by repair step
+    issue_count: 4
+    issues:
+      - "column_name_drift"
+      - "missing_value_NA"
+      - "missing_value_empty"
+      - "currency_formatting"
+
+  sales_q3.csv:
+    display_name: "Q3 Sales"
+    # Raw stats
+    raw_row_count: 7
+    column_count: 5
+    columns: ["date", "product", "category", "units", "revenue"]
+    # After dedup: 6 unique rows
+    unique_row_count: 6
+    # Revenue (duplicate excluded, empty/NULL treated as 0)
+    total_revenue: 22500.00
+    # Quality flags
+    has_duplicates: true         # 2024-07-01 row appears twice
+    has_missing_values: true     # N/A, empty, NULL
+    has_negative_values: false
+    has_outliers: false
+    has_column_drift: false
+    has_currency_format: false
+    # Issues
+    issue_count: 3
+    issues:
+      - "duplicate_rows"
+      - "missing_value_NA"
+      - "missing_value_NULL"
+
+  sales_q4.csv:
+    display_name: "Q4 Sales"
+    # Raw stats
+    raw_row_count: 7
+    column_count: 5
+    columns: ["date", "product", "category", "units", "revenue"]
+    # Revenue (sum including outliers)
+    total_revenue: 2118550.00
+    # "Normal" revenue excluding outliers (for reference)
+    normal_revenue_total: 18550.00
+    total_units: 573
+    # Quality flags
+    has_duplicates: false
+    has_missing_values: false
+    has_negative_values: true    # -5 units, -250 revenue
+    has_outliers: true           # 900000, 1200000 (100x+ normal range)
+    has_column_drift: false
+    has_currency_format: false
+    # Outlier details
+    outliers:
+      - row: 3
+        product: "Gadget X"
+        revenue: 900000.00
+        reason: "100x above normal range (~5000)"
+      - row: 7
+        product: "Widget A"
+        revenue: 1200000.00
+        reason: "200x above normal range (~5000)"
+    # Issues
+    issue_count: 2
+    issues:
+      - "negative_values"
+      - "extreme_outliers"
+
+# Aggregate statistics
+aggregate:
+  total_files: 4
+  total_raw_rows: 28
+  files_with_issues: 3
+  clean_files: 1
+  grand_total_revenue: 2199150.00   # sum of all total_revenue
+  # Expected sections in report
+  required_sections:
+    - "data_quality"
+    - "quarterly_summary"
+    - "anomalies"
+    - "recovery_log"
+  # Expected data points that MUST appear
+  required_data_points:
+    - "total_files_processed"
+    - "q1_revenue"
+    - "q2_revenue"
+    - "q3_revenue"
+    - "q4_revenue"
+    - "files_with_issues_count"
+    - "total_issues_found"
+
+# Tolerance for numeric comparisons (absolute)
+numeric_tolerance: 0.01

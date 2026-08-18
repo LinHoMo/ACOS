@@ -203,6 +203,9 @@ pub trait ArtifactStore: Send + Sync + std::fmt::Debug {
 
     /// Retrieves an artifact by id.
     async fn get(&self, id: ArtifactId) -> Result<Vec<u8>, AcosError>;
+
+    /// Retrieves the latest artifact by name for a run.
+    async fn get_by_name(&self, run_id: RunId, name: &str) -> Result<Vec<u8>, AcosError>;
 }
 
 // ── Plugin registry ──────────────────────────────────────────────────────────

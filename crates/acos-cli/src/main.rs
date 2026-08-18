@@ -23,7 +23,7 @@ use acos_core::traits::Compiler;
 use acos_core::types::{CirProgram, TaskSpec, TypedValue, ValueType};
 use acos_runtime::Runtime;
 use acos_state::InMemoryStore;
-use acos_verify::verify_run;
+use acos_verify::{verify_run, verify_run_full, GroundTruth};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -80,13 +80,17 @@ async fn main() -> Result<(), AcosError> {
             std::process::exit(if report.failed() == 0 { 0 } else { 1 });
         }
         Some("run-cir") => {
-            // acos run-cir <cir.json> [--env <env.json>]
-            let path = positional.get(2).expect("usage: acos run-cir <cir.json> [--env <env.json>]");
+            // acos run-cir <cir.json> [--env <env.json>] [--verify <ground_truth.yaml>]
+            let path = positional.get(2).expect("usage: acos run-cir <cir.json> [--env <env.json>] [--verify <ground_truth.yaml>]");
             let env_path = match args.iter().position(|a| a == "--env") {
                 Some(idx) => args.get(idx + 1).map(|s| s.as_str()),
                 None => None,
             };
-            run_cir(path, env_path).await
+            let verify_path = match args.iter().position(|a| a == "--verify") {
+                Some(idx) => args.get(idx + 1).map(|s| s.as_str()),
+                None => None,
+            };
+            run_cir(path, env_path, verify_path).await
         }
         Some("compile") => {
             let path = positional.get(2).expect("usage: acos compile <task.yaml>");
@@ -159,7 +163,7 @@ async fn compile(task: &TaskSpec, use_rules: bool) -> Result<acos_core::traits::
 }
 
 /// Loads a CIR JSON file and runs it directly, bypassing the compiler.
-async fn run_cir(path: &str, env_path: Option<&str>) -> Result<(), AcosError> {
+async fn run_cir(path: &str, env_path: Option<&str>, verify_path: Option<&str>) -> Result<(), AcosError> {
     let json = tokio::fs::read_to_string(path)
         .await
         .map_err(|e| AcosError::ValidationFailure {
@@ -187,18 +191,47 @@ async fn run_cir(path: &str, env_path: Option<&str>) -> Result<(), AcosError> {
         std::sync::Arc::new(InMemoryStore::new());
     let artifact_store: std::sync::Arc<dyn acos_core::traits::ArtifactStore + Send + Sync> =
         std::sync::Arc::new(InMemoryStore::new());
-    let runtime = Runtime::new(event_store.clone(), artifact_store);
+    let runtime = Runtime::new(event_store.clone(), artifact_store.clone());
     let report = runtime.execute_with_env(program, None, seed_env).await?;
 
     println!("Run {}: {:?}", report.run_id.0, report.status);
     println!("Artifacts: {:?}", report.artifacts);
     println!("Evidence: {} items", report.evidence.len());
 
-    let verification = verify_run(&*event_store, report.run_id).await?;
-    println!(
-        "Verification: {}",
-        if verification.all_passed() { "PASSED" } else { "FAILED" }
-    );
+    // Read artifact content for verification
+    let artifact_content = if !report.artifacts.is_empty() {
+        let artifact_name = &report.artifacts[0];
+        artifact_store.get_by_name(report.run_id, artifact_name).await.ok()
+    } else {
+        None
+    };
+
+    if let Some(gt_path) = verify_path {
+        // Full three-layer verification against ground truth
+        let ground_truth = GroundTruth::from_yaml(gt_path)?;
+        let verification = verify_run_full(&*event_store, artifact_content, report.run_id, &ground_truth).await?;
+        println!("\n=== Semantic Verification ===");
+        println!("Overall: {}", if verification.all_passed() { "PASSED" } else { "FAILED" });
+        println!("\n[Structural]");
+        for f in verification.layer_findings(acos_verify::VerificationLayer::Structural) {
+            println!("  [{}] {}", if f.passed { "PASS" } else { "FAIL" }, f.message);
+        }
+        println!("\n[Semantic]");
+        for f in verification.layer_findings(acos_verify::VerificationLayer::Semantic) {
+            println!("  [{}] {}", if f.passed { "PASS" } else { "FAIL" }, f.message);
+        }
+        println!("\n[Evidence]");
+        for f in verification.layer_findings(acos_verify::VerificationLayer::Evidence) {
+            println!("  [{}] {}", if f.passed { "PASS" } else { "FAIL" }, f.message);
+        }
+    } else {
+        // Legacy MVP verification
+        let verification = verify_run(&*event_store, report.run_id).await?;
+        println!(
+            "Verification: {}",
+            if verification.all_passed() { "PASSED" } else { "FAILED" }
+        );
+    }
     Ok(())
 }
 

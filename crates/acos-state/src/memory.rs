@@ -123,4 +123,16 @@ impl ArtifactStore for InMemoryStore {
                 message: format!("artifact {id:?} not found"),
             })
     }
+
+    async fn get_by_name(&self, run_id: RunId, name: &str) -> Result<Vec<u8>, AcosError> {
+        self.artifacts
+            .lock()
+            .await
+            .iter()
+            .find(|(_, (rid, n, _))| *rid == run_id && n == name)
+            .map(|(_, (_, _, content))| content.clone())
+            .ok_or_else(|| AcosError::ValidationFailure {
+                message: format!("artifact '{name}' not found for run {run_id:?}"),
+            })
+    }
 }
