@@ -18,8 +18,12 @@ use acos_core::error::AcosError;
 use acos_core::id::{ProgramId, TaskId};
 use acos_core::traits::{CompileResult, Compiler, Diagnostic, DiagnosticLevel};
 use acos_core::types::{
-    CirNode, CirNodeKind, CirProgram, EffectDecl, EffectKind, TaskSpec,
+    CirNode, CirNodeKind, CirProgram, EffectDecl, EffectKind, LoopKind, TaskSpec,
 };
+
+pub mod replan;
+
+pub use replan::ModelRecoveryPlanner;
 
 /// System prompt that teaches Claude the CIR JSON format and the available
 /// primitives. Kept as a constant so it is easy to version and audit.
@@ -59,7 +63,7 @@ You MUST respond with **only valid JSON** (no markdown, no commentary) matching 
 # Rules
 
 1. `nodes` is an array. Each node has: `kind`, `node_id`, `capability` (null for containers), `output` (null unless it binds a value), `children`, `inputs`.
-2. `kind` must be exactly one of: `sequence`, `parallel`, `conditional`, `primitive_invocation`.
+2. `kind` must be exactly one of: `sequence`, `parallel`, `conditional`, `loop_map`, `primitive_invocation`.
 3. A top-level `sequence` container whose `children` list is the execution order is required; put its id in `entry`.
 4. Use `primitiveInvocation` for every primitive call. Set `capability` to the primitive name.
 5. To pass data between nodes, bind an `output` name on the producer and reference it as `"${outputName}"` in the consumer's `inputs`. Do NOT invent other reference syntax.
@@ -67,6 +71,17 @@ You MUST respond with **only valid JSON** (no markdown, no commentary) matching 
 7. Declare every side effect your graph uses in the `effects` array. `kind` must be one of: `fs_read`, `fs_write`, `network_read`, `network_write`, `process_spawn`, `secret_read`, `external_irreversible`. Set `reversible: false` only for `externalIrreversible`.
 8. Choose primitives appropriate to the task. Prefer `read_file` + `summarize` + `write_file` for document/report tasks; use `execute_python` only when the task needs real computation.
 9. Do not add nodes that are not implied by the task goal.
+10. Control semantics: conditions, loops, and retries are expressed via the
+    node-level `control` object, NEVER via extra `inputs` keys and NEVER via a
+    node kind of `retry`:
+    - conditional: { "kind": "conditional", "control": { "condition": { "expression": "exists(doc)" } }, "children": [then...], "elseChildren": [else...] }
+    - loop_map: { "kind": "loop_map", "control": { "loopSpec": { "kind": "while|until|for_each", "condition": "...", "maxIterations": 5, "input": "${files}", "itemVar": "item" } }, "children": [body...] }
+      while/until MUST set maxIterations; for_each uses input + itemVar.
+    - retry: attach "control": { "retry": { "maxAttempts": 3, "backoffMs": 200, "strategy": "fixed", "retryOn": ["timeout", "rate_limit", "transient_network_error"] } } to the executable node.
+    Expression language (acos-expr): exists(name), not_exists(name), field paths
+    like `test.exit_code`, comparisons == != > < >= <=, && || !, string literals
+    in single quotes, numbers, true/false. Only reference `output` names that
+    other nodes in the graph declare.
 
 Think step by step, then output ONLY the JSON.
 
@@ -212,9 +227,11 @@ impl Compiler for RuleCompiler {
                 capability: Some("read_file".to_string()),
                 output: Some(format!("raw_{i}")),
                 children: vec![],
+                else_children: vec![],
                 inputs: vec![("path".to_string(), serde_json::Value::String(input.path.clone()))]
                     .into_iter()
                     .collect(),
+                control: None,
             });
         }
 
@@ -224,7 +241,9 @@ impl Compiler for RuleCompiler {
             capability: None,
             output: None,
             children: read_children.clone(),
+            else_children: vec![],
             inputs: HashMap::new(),
+            control: None,
         });
 
         // Phase 2: summarize all raw documents into a report text.
@@ -238,12 +257,14 @@ impl Compiler for RuleCompiler {
             capability: Some("summarize".to_string()),
             output: Some("report_text".to_string()),
             children: vec![],
+            else_children: vec![],
             inputs: vec![(
                 "documents".to_string(),
                 serde_json::Value::String(serde_json::to_string(&raw_refs).unwrap()),
             )]
             .into_iter()
             .collect(),
+            control: None,
         });
 
         // Phase 3: write the report artifact.
@@ -254,12 +275,14 @@ impl Compiler for RuleCompiler {
             capability: Some("write_file".to_string()),
             output: Some("report_ref".to_string()),
             children: vec![],
+            else_children: vec![],
             inputs: vec![
                 ("path".to_string(), serde_json::Value::String("report.md".to_string())),
                 ("content".to_string(), serde_json::Value::String("${report_text}".to_string())),
             ]
             .into_iter()
             .collect(),
+            control: None,
         });
 
         // Top-level sequence tying the phases together.
@@ -274,7 +297,9 @@ impl Compiler for RuleCompiler {
                 summarize_id.to_string(),
                 write_id.to_string(),
             ],
+            else_children: vec![],
             inputs: HashMap::new(),
+            control: None,
         });
 
         let effects = vec![
@@ -323,7 +348,7 @@ pub async fn compile_task(task: TaskSpec) -> Result<CirProgram, AcosError> {
 
 /// Extracts the first balanced JSON object from text that may contain
 /// markdown fences or surrounding commentary.
-fn extract_json_object(text: &str) -> String {
+pub(crate) fn extract_json_object(text: &str) -> String {
     // Strip common markdown fences if the whole thing is fenced.
     let trimmed = text.trim();
     let candidate = if trimmed.starts_with("```") {
@@ -349,8 +374,13 @@ fn extract_json_object(text: &str) -> String {
     candidate[start..=end].to_string()
 }
 
-/// Validates structural invariants of a CIR program.
-fn validate_cir(program: &CirProgram) -> Result<(), AcosError> {
+/// Validates structural and control-semantic invariants of a CIR program.
+///
+/// Structural: entry/children references exist. Control-semantic: every
+/// Conditional has `control.condition` with statically resolvable
+/// identifiers, every LoopMap has a valid `control.loop_spec`, retry
+/// policies are sane, and `else_children` is only used on Conditional nodes.
+pub fn validate_cir(program: &CirProgram) -> Result<(), AcosError> {
     if program.entry.is_empty() {
         return Err(AcosError::ValidationFailure {
             message: "CIR program must have at least one entry node".into(),
@@ -380,13 +410,115 @@ fn validate_cir(program: &CirProgram) -> Result<(), AcosError> {
             }
         }
     }
+    validate_control_semantics(program)?;
+    Ok(())
+}
+
+fn vf(message: impl Into<String>) -> AcosError {
+    AcosError::ValidationFailure {
+        message: message.into(),
+    }
+}
+
+fn validate_control_semantics(program: &CirProgram) -> Result<(), AcosError> {
+    let outputs: std::collections::HashSet<&str> = program
+        .nodes
+        .iter()
+        .filter_map(|n| n.output.as_deref())
+        .collect();
+
+    for node in &program.nodes {
+        if !matches!(node.kind, CirNodeKind::Conditional) && !node.else_children.is_empty() {
+            return Err(vf(format!(
+                "node '{}' uses else_children but is not conditional",
+                node.node_id
+            )));
+        }
+        match node.kind {
+            CirNodeKind::Conditional => {
+                let cond = node
+                    .control
+                    .as_ref()
+                    .and_then(|c| c.condition.as_ref())
+                    .ok_or_else(|| {
+                        vf(format!(
+                            "conditional node '{}' has no control.condition",
+                            node.node_id
+                        ))
+                    })?;
+                let expr = acos_core::expr::parse(&cond.expression)
+                    .map_err(|e| vf(format!("conditional node '{}': {e}", node.node_id)))?;
+                for id in acos_core::expr::collect_identifiers(&expr) {
+                    if !outputs.contains(id.as_str()) {
+                        return Err(vf(format!(
+                            "conditional node '{}' references undeclared identifier '{id}'",
+                            node.node_id
+                        )));
+                    }
+                }
+            }
+            CirNodeKind::LoopMap => {
+                let spec = node
+                    .control
+                    .as_ref()
+                    .and_then(|c| c.loop_spec.as_ref())
+                    .ok_or_else(|| {
+                        vf(format!("loop node '{}' has no control.loop_spec", node.node_id))
+                    })?;
+                match spec.kind {
+                    LoopKind::While | LoopKind::Until => {
+                        if spec.condition.is_none() {
+                            return Err(vf(format!(
+                                "loop node '{}' must set control.loop_spec.condition for {:?}",
+                                node.node_id, spec.kind
+                            )));
+                        }
+                        if spec.max_iterations.is_none() {
+                            return Err(vf(format!(
+                                "loop node '{}' must set max_iterations for {:?} (termination guarantee)",
+                                node.node_id, spec.kind
+                            )));
+                        }
+                    }
+                    LoopKind::ForEach => {
+                        if spec.input.is_none() || spec.item_var.is_none() {
+                            return Err(vf(format!(
+                                "loop node '{}' must set input and item_var for for_each",
+                                node.node_id
+                            )));
+                        }
+                    }
+                }
+                if spec.max_iterations == Some(0) {
+                    return Err(vf(format!(
+                        "loop node '{}' max_iterations must be >= 1",
+                        node.node_id
+                    )));
+                }
+            }
+            _ => {}
+        }
+        if let Some(retry) = node.control.as_ref().and_then(|c| c.retry.as_ref()) {
+            if retry.max_attempts == 0 {
+                return Err(vf(format!(
+                    "node '{}' retry.max_attempts must be >= 1",
+                    node.node_id
+                )));
+            }
+        }
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use acos_core::id::{ProgramId, TaskId};
     use acos_core::types::TaskInput;
+    use acos_core::types::{
+        CirNode, CirNodeKind, ConditionSpec, ControlSpec, LoopKind, LoopSpec, RetryPolicy,
+        RetryStrategy,
+    };
 
     fn sample_task() -> TaskSpec {
         TaskSpec {
@@ -437,5 +569,127 @@ mod tests {
     fn extract_json_handles_commentary() {
         let text = "Here is the plan:\n{\"x\": 42}\nDone.";
         assert_eq!(extract_json_object(text), "{\"x\": 42}");
+    }
+
+    fn program_with(nodes: Vec<CirNode>) -> CirProgram {
+        CirProgram {
+            id: ProgramId::new(),
+            task_id: TaskId(uuid::Uuid::new_v4()),
+            entry: nodes.iter().map(|n| n.node_id.clone()).collect::<Vec<_>>(),
+            nodes,
+            effects: vec![],
+        }
+    }
+
+    fn primitive_node(id: &str) -> CirNode {
+        CirNode {
+            kind: CirNodeKind::PrimitiveInvocation,
+            node_id: id.into(),
+            capability: Some("search".into()),
+            output: Some(format!("out_{id}")),
+            children: vec![],
+            else_children: vec![],
+            inputs: HashMap::new(),
+            control: None,
+        }
+    }
+
+    #[test]
+    fn validate_accepts_valid_conditional() {
+        let cond = CirNode {
+            kind: CirNodeKind::Conditional,
+            node_id: "check".into(),
+            capability: None,
+            output: None,
+            children: vec!["then".into()],
+            else_children: vec![],
+            inputs: HashMap::new(),
+            control: Some(ControlSpec {
+                condition: Some(ConditionSpec {
+                    expression: "exists(out_search)".into(),
+                }),
+                loop_spec: None,
+                retry: None,
+            }),
+        };
+        let program = program_with(vec![primitive_node("search"), primitive_node("then"), cond]);
+        assert!(validate_cir(&program).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_loop_without_max_iterations() {
+        let loop_node = CirNode {
+            kind: CirNodeKind::LoopMap,
+            node_id: "loop".into(),
+            capability: None,
+            output: None,
+            children: vec![],
+            else_children: vec![],
+            inputs: HashMap::new(),
+            control: Some(ControlSpec {
+                condition: None,
+                loop_spec: Some(LoopSpec {
+                    kind: LoopKind::While,
+                    condition: Some("1 == 1".into()),
+                    max_iterations: None,
+                    input: None,
+                    item_var: None,
+                }),
+                retry: None,
+            }),
+        };
+        let err = validate_cir(&program_with(vec![loop_node])).unwrap_err();
+        assert!(err.to_string().contains("max_iterations"));
+    }
+
+    #[test]
+    fn validate_rejects_retry_zero_attempts() {
+        let node = CirNode {
+            control: Some(ControlSpec {
+                condition: None,
+                loop_spec: None,
+                retry: Some(RetryPolicy {
+                    max_attempts: 0,
+                    backoff_ms: 1,
+                    strategy: RetryStrategy::Fixed,
+                    retry_on: vec![],
+                }),
+            }),
+            ..primitive_node("p")
+        };
+        let err = validate_cir(&program_with(vec![node])).unwrap_err();
+        assert!(err.to_string().contains("max_attempts"));
+    }
+
+    #[test]
+    fn validate_rejects_condition_with_undeclared_identifier() {
+        let cond = CirNode {
+            kind: CirNodeKind::Conditional,
+            node_id: "check".into(),
+            capability: None,
+            output: None,
+            children: vec![],
+            else_children: vec![],
+            inputs: HashMap::new(),
+            control: Some(ControlSpec {
+                condition: Some(ConditionSpec {
+                    expression: "exists(test.exit_cod)".into(),
+                }),
+                loop_spec: None,
+                retry: None,
+            }),
+        };
+        let err = validate_cir(&program_with(vec![primitive_node("search"), cond])).unwrap_err();
+        assert!(err.to_string().contains("undeclared identifier"));
+    }
+
+    #[test]
+    fn validate_rejects_else_children_on_non_conditional() {
+        let node = CirNode {
+            else_children: vec!["x".into()],
+            ..primitive_node("p")
+        };
+        let err = validate_cir(&program_with(vec![node])).unwrap_err();
+        assert!(err.to_string().contains("else_children"));
     }
 }

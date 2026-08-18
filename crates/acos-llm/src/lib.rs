@@ -89,6 +89,17 @@ impl LongCatClient {
         })
     }
 
+    /// Creates a client that always fails on `complete` (for tests that only
+    /// exercise parsing/prompt-building without network access).
+    pub fn dummy() -> Self {
+        Self {
+            http: reqwest::Client::new(),
+            api_key: String::new(),
+            base_url: "http://127.0.0.1:1".into(),
+            model: "dummy".into(),
+        }
+    }
+
     /// Sends a single-turn chat completion and returns the assistant text.
     ///
     /// `system` is the system prompt; `user` is the user instruction.
