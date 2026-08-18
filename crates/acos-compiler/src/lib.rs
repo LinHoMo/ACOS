@@ -27,7 +27,11 @@ use acos_core::types::{
 
 pub mod replan;
 
+mod contract;
+
 pub use replan::ModelRecoveryPlanner;
+
+use crate::contract::validate_data_contract;
 
 // ── P1-5A: Compiler Error Classification ─────────────────────────────────────
 
@@ -94,6 +98,20 @@ pub enum CompilerError {
         /// Node ids that are unreachable from `program.entry`.
         node_ids: Vec<String>,
     },
+    /// A `${ref}` in inputs/control does not resolve to any producer binding.
+    UnresolvedBinding {
+        /// Node that contains the bad reference.
+        node_id: String,
+        /// The unresolved binding name (dotted path prefix).
+        binding: String,
+    },
+    /// Data contract rule violation (type/field/ordering/completeness).
+    DataContractViolation {
+        /// Node that violates the contract.
+        node_id: String,
+        /// Human-readable explanation.
+        message: String,
+    },
     /// Repair was attempted but did not produce a valid CIR within the attempt limit.
     RepairExhausted {
         /// Number of repair attempts made (excluding the initial attempt).
@@ -136,6 +154,12 @@ impl std::fmt::Display for CompilerError {
                     "unreachable nodes: {} are not reachable from any entry node",
                     node_ids.join(", ")
                 )
+            }
+            CompilerError::UnresolvedBinding { node_id, binding } => {
+                write!(f, "node '{node_id}' references unresolved binding '${{{binding}}}'")
+            }
+            CompilerError::DataContractViolation { node_id, message } => {
+                write!(f, "node '{node_id}' violates data contract: {message}")
             }
             CompilerError::RepairExhausted { attempts, last_error } => {
                 write!(f, "repair exhausted after {attempts} attempts; last error: {last_error}")
@@ -1001,6 +1025,9 @@ fn validate_cir_semantic(program: &CirProgram) -> Result<(), CompilerError> {
     if !orphans.is_empty() {
         return Err(CompilerError::UnreachableNodes { node_ids: orphans });
     }
+
+    // Stage data contract (R1–R5).
+    validate_data_contract(program)?;
 
     // No-op guard: a program with zero primitives cannot produce any task
     // output. Reject it so "compile success" means the program does something.
