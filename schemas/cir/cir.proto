@@ -43,6 +43,10 @@ message CirNode {
   optional string primitive_id = 3;
   optional string output = 4;
   repeated string children = 5;
+  // False branch for conditional nodes (true branch is `children`). P0.
+  repeated string else_children = 6;
+  // Control semantics (condition / loop / retry), distinct from `inputs`. P0.
+  ControlSpec control = 7;
 }
 
 // An effect kind.
@@ -62,4 +66,61 @@ message EffectDecl {
   EffectKind kind = 1;
   string description = 2;
   bool reversible = 3;
+}
+
+// ── Control semantics (P0) ───────────────────────────────────────────────────
+
+// Control semantics attached to a node — distinct from business `inputs`.
+message ControlSpec {
+  ConditionSpec condition = 1; // for conditional nodes
+  LoopSpec loop_spec = 2;     // for loop_map nodes
+  RetryPolicy retry = 3;      // retry policy for any executable node
+}
+
+// Condition expression for a conditional node (acos-expr safe subset).
+message ConditionSpec {
+  string expression = 1;
+}
+
+// Loop kind for a loop_map node.
+enum LoopKind {
+  LOOP_KIND_UNSPECIFIED = 0;
+  LOOP_KIND_WHILE = 1;   // evaluate condition first; run body while true
+  LOOP_KIND_UNTIL = 2;   // run body first; exit when condition true
+  LOOP_KIND_FOR_EACH = 3; // iterate over an env list, binding item_var
+}
+
+// Loop configuration for a loop_map node.
+message LoopSpec {
+  LoopKind kind = 1;
+  optional string condition = 2;     // while/until condition expression
+  optional uint32 max_iterations = 3; // required for while/until (>= 1); for_each: null = whole list
+  optional string input = 4;         // for_each: env reference to the input list
+  optional string item_var = 5;      // for_each: iteration variable bound in env
+}
+
+// Retry strategy.
+enum RetryStrategy {
+  RETRY_STRATEGY_UNSPECIFIED = 0;
+  RETRY_STRATEGY_FIXED = 1;
+}
+
+// Failure class used to decide retry/recovery behavior.
+enum FailureClass {
+  FAILURE_CLASS_UNSPECIFIED = 0;
+  FAILURE_CLASS_TIMEOUT = 1;
+  FAILURE_CLASS_RATE_LIMIT = 2;
+  FAILURE_CLASS_TRANSIENT_NETWORK_ERROR = 3;
+  FAILURE_CLASS_INVALID_INPUT = 4;
+  FAILURE_CLASS_PERMISSION_DENIED = 5;
+  FAILURE_CLASS_SYNTAX_ERROR = 6;
+  FAILURE_CLASS_UNKNOWN = 7;
+}
+
+// Retry policy attached via ControlSpec.retry.
+message RetryPolicy {
+  uint32 max_attempts = 1;          // total attempts incl. first; must be >= 1
+  uint64 backoff_ms = 2;            // delay between attempts (ms)
+  RetryStrategy strategy = 3;       // fixed delay (MVP)
+  repeated FailureClass retry_on = 4; // classes to retry; empty = all retryable
 }

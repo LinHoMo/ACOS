@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::id::{ArtifactId, ProgramId, RunId, TaskId};
+use crate::id::{ProgramId, RunId, TaskId};
 
 // ── Task specification (compiler front-end input) ────────────────────────────
 
@@ -169,6 +169,10 @@ pub enum CirNodeKind {
     /// Loop / map.
     LoopMap,
     /// Retry node.
+    ///
+    /// Deprecated: retry semantics are expressed via [`ControlSpec::retry`]
+    /// since P0. Kept for wire compatibility with CIR v0.1; removed in CIR 2.0.
+    #[deprecated(note = "use ControlSpec.retry")]
     Retry,
     /// Checkpoint.
     Checkpoint,
@@ -176,6 +180,106 @@ pub enum CirNodeKind {
     Verification,
     /// Artifact reference.
     ArtifactRef,
+}
+
+// ── Control semantics ────────────────────────────────────────────────────────
+
+/// Condition expression attached to a `Conditional` node.
+///
+/// Uses the safe `acos-expr` subset (`acos_core::expr`); no arbitrary code
+/// and no fuzzy reference resolution.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConditionSpec {
+    /// Expression, e.g. `exists(doc)` or `test.exit_code != 0`.
+    pub expression: String,
+}
+
+/// Loop kind of a `LoopMap` node.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LoopKind {
+    /// Evaluate condition first; run body while true.
+    While,
+    /// Run body first; exit when condition true.
+    Until,
+    /// Iterate over an env list binding `item_var` each round.
+    ForEach,
+}
+
+/// Loop configuration of a `LoopMap` node.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LoopSpec {
+    /// Loop kind.
+    pub kind: LoopKind,
+    /// While/Until condition expression.
+    pub condition: Option<String>,
+    /// While/Until: required, >= 1. ForEach: `None` = whole input list.
+    pub max_iterations: Option<u32>,
+    /// ForEach: env reference to the input list (e.g. `"${files}"`).
+    pub input: Option<String>,
+    /// ForEach: name of the iteration variable bound in env.
+    pub item_var: Option<String>,
+}
+
+/// Retry strategy.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RetryStrategy {
+    /// Fixed delay between attempts.
+    Fixed,
+}
+
+/// Failure class used to decide retry/recovery behavior.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureClass {
+    /// Operation timed out.
+    Timeout,
+    /// Rate limited by an external system.
+    RateLimit,
+    /// Transient network error.
+    TransientNetworkError,
+    /// Input was invalid.
+    InvalidInput,
+    /// Permission denied.
+    PermissionDenied,
+    /// Syntax error in user-provided code.
+    SyntaxError,
+    /// Unclassifiable.
+    #[default]
+    Unknown,
+}
+
+/// Retry policy attached via [`ControlSpec::retry`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RetryPolicy {
+    /// Total attempts including the first; must be >= 1 (0 rejected at compile).
+    pub max_attempts: u32,
+    /// Delay between attempts in milliseconds.
+    pub backoff_ms: u64,
+    /// Retry strategy (MVP: fixed delay only).
+    pub strategy: RetryStrategy,
+    /// Failure classes to retry; empty = all retryable classes.
+    #[serde(default)]
+    pub retry_on: Vec<FailureClass>,
+}
+
+/// Control semantics attached to a node — distinct from business `inputs`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlSpec {
+    /// Condition for `Conditional` nodes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition: Option<ConditionSpec>,
+    /// Loop config for `LoopMap` nodes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub loop_spec: Option<LoopSpec>,
+    /// Retry policy for any executable node.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry: Option<RetryPolicy>,
 }
 
 /// A single node in the CIR graph.
@@ -193,10 +297,16 @@ pub struct CirNode {
     pub output: Option<String>,
     /// Child node ids (for sequence/parallel/conditional/loop).
     pub children: Vec<String>,
+    /// False branch for `Conditional` nodes (true branch is `children`).
+    #[serde(default)]
+    pub else_children: Vec<String>,
     /// Input bindings for primitive invocations: param name -> literal or
     /// `$output_ref`. The runtime resolves `$ref` against the environment.
     #[serde(default)]
     pub inputs: std::collections::HashMap<String, serde_json::Value>,
+    /// Control semantics (condition/loop/retry), separate from `inputs`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<ControlSpec>,
 }
 
 /// A compiled cognitive program (the CIR).
@@ -217,6 +327,42 @@ pub struct CirProgram {
     pub effects: Vec<EffectDecl>,
 }
 
+// ── Failure recovery ─────────────────────────────────────────────────────────
+
+/// Context describing a runtime failure, passed to replanners.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FailureContext {
+    /// The failing run.
+    pub run_id: RunId,
+    /// Id of the deepest failing node.
+    pub node_id: String,
+    /// Classified failure class.
+    pub error_class: FailureClass,
+    /// Human-readable error message.
+    pub error_message: String,
+    /// Recovery attempts already consumed.
+    pub attempts: u32,
+    /// Most recent events of the run (newest first, up to 5).
+    pub recent_events: Vec<crate::traits::Event>,
+}
+
+/// A recovery patch proposal produced by a replanner.
+///
+/// The runtime validates and commits it transactionally; the subgraph root
+/// MUST reuse [`Self::replace_node`] as its node id so upstream/downstream
+/// references stay intact.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryProposal {
+    /// Id of the failing node being replaced.
+    pub replace_node: String,
+    /// Replacement subgraph; root keeps `replace_node`'s id.
+    pub subgraph: Vec<CirNode>,
+    /// Human-readable reason.
+    pub reason: String,
+}
+
 // ── Convenience aliases ──────────────────────────────────────────────────────
 
 /// A task paired with its spec (used at the compiler boundary).
@@ -227,3 +373,59 @@ pub use crate::id::TaskId as TaskIdAlias;
 
 /// A run identifier alias for readability at call sites.
 pub use crate::id::RunId as RunIdAlias;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn control_spec_roundtrips_to_json() {
+        let control = ControlSpec {
+            condition: Some(ConditionSpec { expression: "exists(doc)".into() }),
+            loop_spec: None,
+            retry: Some(RetryPolicy {
+                max_attempts: 3,
+                backoff_ms: 100,
+                strategy: RetryStrategy::Fixed,
+                retry_on: vec![FailureClass::Timeout],
+            }),
+        };
+        let json = serde_json::to_string(&control).unwrap();
+        let back: ControlSpec = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, control);
+    }
+
+    #[test]
+    fn cir_node_control_and_else_children_default_to_empty() {
+        let json = r#"{"kind":"primitive_invocation","nodeId":"a","capability":"read_file","output":null,"children":[],"inputs":{}}"#;
+        let node: CirNode = serde_json::from_str(json).unwrap();
+        assert_eq!(node.control, None);
+        assert!(node.else_children.is_empty());
+    }
+
+    #[test]
+    fn loop_spec_serializes_camel_case() {
+        let spec = LoopSpec {
+            kind: LoopKind::ForEach,
+            condition: None,
+            max_iterations: None,
+            input: Some("${files}".into()),
+            item_var: Some("item".into()),
+        };
+        let json = serde_json::to_value(&spec).unwrap();
+        assert_eq!(json["kind"], "for_each");
+        assert_eq!(json["maxIterations"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn recovery_proposal_roundtrips() {
+        let p = RecoveryProposal {
+            replace_node: "B".into(),
+            subgraph: vec![],
+            reason: "fallback".into(),
+        };
+        let json = serde_json::to_string(&p).unwrap();
+        let back: RecoveryProposal = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, p);
+    }
+}

@@ -10,6 +10,7 @@
 #![warn(missing_docs)]
 
 pub mod error;
+pub mod expr;
 pub mod id;
 pub mod schema;
 pub mod traits;
@@ -17,4 +18,8 @@ pub mod types;
 
 pub use error::AcosError;
 pub use id::{ArtifactId, PrimitiveId, ProgramId, RunId, TaskId};
-pub use types::{CirProgram, EffectDecl, EffectKind, Task, TaskSpec, TypedValue, ValueType};
+pub use types::{
+    CirProgram, ConditionSpec, ControlSpec, EffectDecl, EffectKind, FailureClass, FailureContext,
+    LoopKind, LoopSpec, RecoveryProposal, RetryPolicy, RetryStrategy, Task, TaskSpec, TypedValue,
+    ValueType,
+};

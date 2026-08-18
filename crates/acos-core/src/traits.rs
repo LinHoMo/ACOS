@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AcosError;
 use crate::id::{ArtifactId, PrimitiveId, RunId};
-use crate::types::{CirProgram, EffectDecl, TaskSpec, TypedValue};
+use crate::types::{CirProgram, EffectDecl, FailureContext, RecoveryProposal, TaskSpec, TypedValue};
 
 // ── Primitive ────────────────────────────────────────────────────────────────
 
@@ -64,6 +64,14 @@ pub trait Primitive: Send + Sync + std::fmt::Debug {
 
     /// Executes the compensation for a performed effect.
     async fn compensate(&self, effect: &EffectDecl, input: TypedValue) -> Result<(), AcosError>;
+
+    /// Returns whether repeating this primitive is safe (idempotent).
+    ///
+    /// Defaults to `false`. Primitives that can be safely re-invoked without
+    /// duplicated side effects (e.g. pure reads) may override this.
+    fn idempotent(&self) -> bool {
+        false
+    }
 }
 
 // ── Compiler ─────────────────────────────────────────────────────────────────
@@ -232,4 +240,34 @@ pub struct PrimitiveManifest {
     pub runtime: String,
     /// Provider command.
     pub command: String,
+}
+
+// ── Recovery replanners ──────────────────────────────────────────────────────
+
+/// Deterministic failure recovery planner (rule-based, no external deps).
+pub trait Replanner: Send + Sync + std::fmt::Debug {
+    /// Proposes a recovery patch for a failure, or `None` if this replanner
+    /// cannot handle it.
+    fn propose(&self, failure: &FailureContext, program: &CirProgram)
+        -> Option<RecoveryProposal>;
+}
+
+/// Model-driven recovery planner (LLM generates recovery subgraphs).
+#[async_trait]
+pub trait ModelReplanner: Send + Sync + std::fmt::Debug {
+    /// Proposes a recovery patch for a failure, or `None` if unavailable.
+    async fn propose(
+        &self,
+        failure: &FailureContext,
+        program: &CirProgram,
+    ) -> Result<Option<RecoveryProposal>, AcosError>;
+}
+
+/// Recovery strategies wired into one execution.
+#[derive(Debug, Default)]
+pub struct RecoveryContext<'a> {
+    /// Deterministic rule replanner (tried first).
+    pub rule: Option<&'a dyn Replanner>,
+    /// Model replanner (tried when rules cannot fix).
+    pub model: Option<&'a dyn ModelReplanner>,
 }
