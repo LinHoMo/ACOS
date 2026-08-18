@@ -163,9 +163,24 @@ const ALLOWED_EFFECT_KINDS: &[&str] = &[
 
 // ── System Prompt ────────────────────────────────────────────────────────────
 
-/// System prompt that teaches Claude the CIR JSON format and the available
-/// primitives. Kept as a constant so it is easy to version and audit.
+/// System prompt that teaches the model the CIR JSON format, the available
+/// primitives, and the **semantic grounding contract** — what the model may
+/// not invent or simplify away.
+///
+/// P1-5B-A: Semantic Grounding Prompt. The rules here are compiler contract,
+/// not workflow hints. They tell the model what facts are authoritative and
+/// what it must preserve — without dictating specific control structures.
 const PLANNER_SYSTEM_PROMPT: &str = r#"You are the ACOS Cognitive Planner. Your job is to compile a structured task into a **Cognitive Intermediate Representation (CIR)** — a JSON execution graph the ACOS runtime can execute.
+
+# Semantic Grounding Rules (COMPILER CONTRACT — MUST OBEY)
+
+1. **TaskSpec.inputs are authoritative.** Use the exact paths declared in the task specification. Never invent, replace, normalize, or guess input paths. If the task declares 4 CSV files, your CIR must reference all 4 declared paths.
+2. **Every external resource referenced by the generated CIR must originate from a declared input, an environment binding, or a capability-produced output.** Do not reference files, URLs, or services not present in the task context.
+3. **Preserve the semantics of the task goal and explicit constraints.** Do not simplify away required operations. If the task requires detection, repair, validation, and aggregation, your CIR must contain nodes for each.
+4. **Every required output declared by TaskSpec must be represented by the generated program.** If the task declares a Markdown report, your CIR must produce it.
+5. **Generated nodes must have explicit data/control dependencies.** Do not emit a generic read→summarize→write template when the task requires iteration, validation, branching, recovery, or aggregation.
+6. **Choose control structures based on task semantics.** Use loops when the task requires per-item processing; use conditionals when the task requires branching; use retry when the task requires recovery. Do not use a control structure merely because an example uses it.
+7. **The generated CIR must be executable using only the declared capabilities.** Every `primitive_invocation` must reference a capability from the Available Primitives table.
 
 # Available primitives (capabilities)
 
@@ -188,7 +203,7 @@ You MUST respond with **only valid JSON** (no markdown, no commentary) matching 
   "entry": ["root"],
   "nodes": [
     { "kind": "sequence", "nodeId": "root", "capability": null, "output": null, "children": ["step_0"], "inputs": {} },
-    { "kind": "primitive_invocation", "nodeId": "step_0", "capability": "read_file", "output": "raw_0", "children": [], "inputs": { "path": "/tmp/data/a.txt" } },
+    { "kind": "primitive_invocation", "nodeId": "step_0", "capability": "read_file", "output": "raw_0", "children": [], "inputs": { "path": "/absolute/path/to/file" } },
     { "kind": "primitive_invocation", "nodeId": "step_1", "capability": "write_file", "output": "report_ref", "children": [], "inputs": { "path": "report.md", "content": "${raw_0}" } }
   ],
   "effects": [
@@ -198,24 +213,23 @@ You MUST respond with **only valid JSON** (no markdown, no commentary) matching 
 }
 ```
 
-# Rules
+# Structural Rules
 
 1. `nodes` is an array. Each node has: `kind`, `node_id`, `capability` (null for containers), `output` (null unless it binds a value), `children`, `inputs`.
 2. `kind` must be exactly one of: `sequence`, `parallel`, `conditional`, `loop_map`, `primitive_invocation`.
 3. A top-level `sequence` container whose `children` list is the execution order is required; put its id in `entry`.
-4. Use `primitiveInvocation` for every primitive call. Set `capability` to the primitive name.
+4. Use `primitive_invocation` for every primitive call. Set `capability` to the primitive name.
 5. To pass data between nodes, bind an `output` name on the producer and reference it as `"${outputName}"` in the consumer's `inputs`. Do NOT invent other reference syntax.
 6. `inputs` is an object mapping parameter name -> literal string or `"${reference}"`.
-7. Declare every side effect your graph uses in the `effects` array. `kind` must be one of: `fs_read`, `fs_write`, `network_read`, `network_write`, `process_spawn`, `secret_read`, `external_irreversible`. Set `reversible: false` only for `externalIrreversible`.
-8. Choose primitives appropriate to the task. Prefer `read_file` + `summarize` + `write_file` for document/report tasks; use `execute_python` only when the task needs real computation.
-9. Do not add nodes that are not implied by the task goal.
-10. Control semantics: conditions, loops, and retries are expressed via the
+7. Declare every side effect your graph uses in the `effects` array. `kind` must be one of: `fs_read`, `fs_write`, `network_read`, `network_write`, `process_spawn`, `secret_read`, `external_irreversible`. Set `reversible: false` only for `external_irreversible`.
+8. Do not add nodes that are not implied by the task goal.
+9. Control semantics: conditions, loops, and retries are expressed via the
     node-level `control` object, NEVER via extra `inputs` keys and NEVER via a
     node kind of `retry`:
-    - conditional: { "kind": "conditional", "control": { "condition": { "expression": "exists(doc)" } }, "children": [then...], "elseChildren": [else...] }
-    - loop_map: { "kind": "loop_map", "control": { "loopSpec": { "kind": "while|until|for_each", "condition": "...", "maxIterations": 5, "input": "${files}", "itemVar": "item" } }, "children": [body...] }
+    - conditional: `{ "kind": "conditional", "control": { "condition": { "expression": "exists(doc)" } }, "children": [then...], "elseChildren": [else...] }`
+    - loop_map: `{ "kind": "loop_map", "control": { "loopSpec": { "kind": "while|until|for_each", "condition": "...", "maxIterations": 5, "input": "${files}", "itemVar": "item" } }, "children": [body...] }`
       while/until MUST set max_iterations; for_each uses input + itemVar.
-    - retry: attach "control": { "retry": { "maxAttempts": 3, "backoffMs": 200, "strategy": "fixed", "retryOn": ["timeout", "rate_limit", "transient_network_error"] } } to the executable node.
+    - retry: attach `"control": { "retry": { "maxAttempts": 3, "backoffMs": 200, "strategy": "fixed", "retryOn": ["timeout", "rate_limit", "transient_network_error"] } }` to the executable node.
     Expression language (acos-expr): exists(name), not_exists(name), field paths
     like `test.exit_code`, comparisons == != > < >= <=, && || !, string literals
     in single quotes, numbers, true/false. Only reference `output` names that
@@ -299,13 +313,96 @@ impl ModelCompiler {
         Ok(Self::new(acos_llm::LongCatClient::from_env()?))
     }
 
-    /// Builds the user prompt describing the task to plan.
+    /// Builds a **structured Compile Context** prompt from the TaskSpec.
+    ///
+    /// P1-5B-A: Instead of dumping raw TaskSpec JSON, we expand it into an
+    /// explicit, labeled structure that makes input bindings, outputs,
+    /// constraints, and capabilities unambiguous to the model. This prevents
+    /// the "hallucinated /tmp/... paths" failure mode seen in Probe-1.
     fn build_user_prompt(&self, task: &TaskSpec) -> String {
+        // ── Goal ──────────────────────────────────────────────────────────
+        let mut out = String::new();
+        out.push_str("Compile the following ACOS task into a CIR execution graph.\n\n");
+        out.push_str("# Task Goal\n\n");
+        out.push_str(&task.goal);
+        out.push_str("\n\n");
+
+        // ── Input Bindings (authoritative) ────────────────────────────────
+        if !task.inputs.is_empty() {
+            out.push_str("# Input Bindings (AUTHORITATIVE — use these exact paths)\n\n");
+            out.push_str("The following input files are declared by the task and MUST be used:\n\n");
+            for (i, input) in task.inputs.iter().enumerate() {
+                out.push_str(&format!(
+                    "{}. type=\"{}\", path=\"{}\"",
+                    i + 1,
+                    input.input_type,
+                    input.path
+                ));
+                if let Some(ref fmt) = input.format {
+                    out.push_str(&format!(", format=\"{fmt}\""));
+                }
+                out.push('\n');
+            }
+            out.push_str("\n");
+        }
+
+        // ── Required Outputs ─────────────────────────────────────────────
+        if !task.outputs.is_empty() {
+            out.push_str("# Required Outputs\n\n");
+            out.push_str("The CIR MUST produce:\n\n");
+            for output in &task.outputs {
+                out.push_str(&format!("- type=\"{}\"", output.output_type));
+                if let Some(ref fmt) = output.format {
+                    out.push_str(&format!(", format=\"{fmt}\""));
+                }
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+
+        // ── Constraints ──────────────────────────────────────────────────
+        if let Some(ref c) = task.constraints {
+            out.push_str("# Constraints\n\n");
+            if let Some(t) = c.timeout_seconds {
+                out.push_str(&format!("- timeoutSeconds: {t}\n"));
+            }
+            if let Some(cost) = c.max_cost {
+                out.push_str(&format!("- maxCost: {cost}\n"));
+            }
+            if let Some(net) = c.allowed_network {
+                out.push_str(&format!("- allowedNetwork: {net}\n"));
+            }
+            out.push('\n');
+        }
+
+        // ── Optimization ─────────────────────────────────────────────────
+        if let Some(ref opt) = task.optimization {
+            out.push_str(&format!(
+                "# Optimization: primary=\"{}\"",
+                opt.primary
+            ));
+            if let Some(ref sec) = opt.secondary {
+                out.push_str(&format!(", secondary=\"{sec}\""));
+            }
+            out.push_str("\n\n");
+        }
+
+        // ── Approval ─────────────────────────────────────────────────────
+        if let Some(ref appr) = task.approval {
+            out.push_str(&format!(
+                "# Approval: externalSideEffects=\"{}\"\n\n",
+                appr.external_side_effects
+            ));
+        }
+
+        // ── Full TaskSpec (reference) ────────────────────────────────────
+        out.push_str("# Full TaskSpec (reference JSON)\n\n```json\n");
         let task_json =
             serde_json::to_string_pretty(task).unwrap_or_else(|_| format!("{task:?}"));
-        format!(
-            "Compile the following ACOS task into a CIR execution graph.\n\n```json\n{task_json}\n```"
-        )
+        out.push_str(&task_json);
+        out.push_str("\n```\n");
+
+        out
     }
 
     /// Builds a repair prompt from a previous failed attempt.
