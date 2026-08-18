@@ -69,25 +69,35 @@ pub fn validate_data_contract(program: &CirProgram) -> Result<(), CompilerError>
         // Deviation from plan skeleton: check_node mount point (plan Task 6
         // documents "check_node 对每个进入 walk 的节点" — the plan's own test
         // rejects_unresolved_binding requires non-entry refs to be checked).
-        check_node(node, scope, producers)?;
+        check_node(node, scope)?;
         let mut produced: HashMap<String, OutputSpec> = HashMap::new();
+        // the node's own output is visible to its enclosing scope (R2)
+        if let Some(o) = &node.output {
+            produced.insert(o.name.clone(), o.clone());
+        }
         match node.kind {
-            CirNodeKind::Sequence | CirNodeKind::Parallel => {
+            CirNodeKind::Sequence => {
                 for child_id in &node.children {
                     let child = by_id.get(child_id.as_str()).ok_or_else(|| CompilerError::InvalidReference { node_id: node.node_id.clone(), referenced: child_id.clone() })?;
                     // children see current scope + earlier siblings' outputs
                     let mut child_scope = scope.clone();
                     for (k, v) in &produced { child_scope.insert(k.clone(), v.clone()); }
-                    walk(child, by_id, &mut child_scope, producers)?;
-                    for (k, v) in &child_scope { produced.insert(k.clone(), v.clone()); }
+                    let child_produced = walk(child, by_id, &mut child_scope, producers)?;
+                    for (k, v) in child_produced { produced.insert(k, v); }
                 }
-                // conditional children: both branches stay inside the branch scope
-                if node.kind == CirNodeKind::Sequence {
-                    for child_id in &node.else_children {
-                        let child = by_id.get(child_id.as_str()).ok_or_else(|| CompilerError::InvalidReference { node_id: node.node_id.clone(), referenced: child_id.clone() })?;
-                        let mut child_scope = scope.clone();
-                        walk(child, by_id, &mut child_scope, producers)?;
-                    }
+                // sequence else_children: branch-local scope, outputs do not escape
+                for child_id in &node.else_children {
+                    let child = by_id.get(child_id.as_str()).ok_or_else(|| CompilerError::InvalidReference { node_id: node.node_id.clone(), referenced: child_id.clone() })?;
+                    let mut child_scope = scope.clone();
+                    walk(child, by_id, &mut child_scope, producers)?;
+                }
+            }
+            CirNodeKind::Parallel => {
+                for child_id in &node.children {
+                    let child = by_id.get(child_id.as_str()).ok_or_else(|| CompilerError::InvalidReference { node_id: node.node_id.clone(), referenced: child_id.clone() })?;
+                    // parallel branches share nothing; each gets the incoming scope only
+                    let mut child_scope = scope.clone();
+                    walk(child, by_id, &mut child_scope, producers)?;
                 }
             }
             CirNodeKind::Conditional => {
@@ -115,8 +125,8 @@ pub fn validate_data_contract(program: &CirProgram) -> Result<(), CompilerError>
                     let child = by_id.get(child_id.as_str()).ok_or_else(|| CompilerError::InvalidReference { node_id: node.node_id.clone(), referenced: child_id.clone() })?;
                     let mut child_scope = body_scope.clone();
                     for (k, v) in &body_produced { child_scope.insert(k.clone(), v.clone()); }
-                    walk(child, by_id, &mut child_scope, producers)?;
-                    for (k, v) in &child_scope { body_produced.insert(k.clone(), v.clone()); }
+                    let child_produced = walk(child, by_id, &mut child_scope, producers)?;
+                    for (k, v) in child_produced { body_produced.insert(k, v); }
                 }
                 // loop aggregate output: List<T> where T = last body child output type
                 if let Some(o) = &node.output {
@@ -130,7 +140,6 @@ pub fn validate_data_contract(program: &CirProgram) -> Result<(), CompilerError>
                                     message: format!("loop aggregate output type '{}' must be '{}'", o.type_name, expected),
                                 });
                             }
-                            produced.insert(o.name.clone(), o.clone());
                         }
                         None => return Err(CompilerError::DataContractViolation {
                             node_id: node.node_id.clone(),
@@ -145,12 +154,12 @@ pub fn validate_data_contract(program: &CirProgram) -> Result<(), CompilerError>
     }
 
     // check references against the visible set
-    fn check_node(node: &CirNode, scope: &HashMap<String, OutputSpec>, producers: &HashMap<String, (String, OutputSpec)>) -> Result<(), CompilerError> {
+    fn check_node(node: &CirNode, scope: &HashMap<String, OutputSpec>) -> Result<(), CompilerError> {
         for (key, val) in &node.inputs {
             for raw in extract_refs(val) {
                 let mut parts = raw.split('.');
                 let name = parts.next().unwrap_or("");
-                let spec = scope.get(name).or_else(|| producers.get(name).map(|(_, s)| s));
+                let spec = scope.get(name);
                 let Some(spec) = spec else {
                     return Err(CompilerError::UnresolvedBinding { node_id: node.node_id.clone(), binding: name.to_string() });
                 };
@@ -181,7 +190,7 @@ pub fn validate_data_contract(program: &CirProgram) -> Result<(), CompilerError>
 
     for e in &entry_nodes {
         let mut scope: HashMap<String, OutputSpec> = HashMap::new();
-        check_node(e, &scope, &producers)?;
+        check_node(e, &scope)?;
         let produced = walk(e, &by_id, &mut scope, &producers)?;
         scope.extend(produced);
         // sibling entries share the top-level scope; check remaining nodes through walk
@@ -196,7 +205,7 @@ pub fn validate_data_contract(program: &CirProgram) -> Result<(), CompilerError>
 mod tests {
     use super::*;
     use acos_core::id::{ProgramId, TaskId};
-    use acos_core::types::FieldSpec;
+    use acos_core::types::{ConditionSpec, ControlSpec, FieldSpec};
 
     type OutputArgs = Option<(&'static str, &'static str, Vec<(&'static str, &'static str)>)>;
 
@@ -222,6 +231,12 @@ mod tests {
         CirProgram { id: ProgramId::new(), task_id: TaskId(uuid::Uuid::new_v4()), entry: entry.into_iter().map(String::from).collect(), nodes, effects: vec![] }
     }
 
+    fn seq_root(children: Vec<&str>) -> CirNode {
+        CirNode { kind: CirNodeKind::Sequence, node_id: "root".into(), capability: None, output: None,
+            children: children.into_iter().map(String::from).collect(), else_children: vec![],
+            inputs: HashMap::new(), input_types: HashMap::new(), control: None }
+    }
+
     #[test]
     fn rejects_unresolved_binding() {
         let mut consumer = node("cons", None);
@@ -232,5 +247,57 @@ mod tests {
         let p = program(vec!["root"], vec![root, consumer]);
         let err = validate_data_contract(&p).unwrap_err();
         assert!(matches!(err, CompilerError::UnresolvedBinding { ref binding, .. } if binding == "processed_data"));
+    }
+
+    #[test]
+    fn sequence_allows_earlier_sibling_output() {
+        let a = node("a", Some(("doc", "Document", vec![])));
+        let mut b = node("b", None);
+        b.inputs.insert("text".into(), serde_json::Value::String("${doc}".into()));
+        let root = seq_root(vec!["a", "b"]);
+        assert!(validate_data_contract(&program(vec!["root"], vec![root, a, b])).is_ok());
+    }
+
+    #[test]
+    fn parallel_branches_do_not_share_outputs() {
+        let a = node("a", Some(("doc", "Document", vec![])));
+        let mut b = node("b", None);
+        b.inputs.insert("text".into(), serde_json::Value::String("${doc}".into()));
+        let root = CirNode { kind: CirNodeKind::Parallel, node_id: "root".into(), capability: None,
+            output: None, children: vec!["a".into(), "b".into()], else_children: vec![], inputs: HashMap::new(),
+            input_types: HashMap::new(), control: None };
+        let err = validate_data_contract(&program(vec!["root"], vec![root, a, b])).unwrap_err();
+        assert!(matches!(err, CompilerError::UnresolvedBinding { .. }));
+    }
+
+    #[test]
+    fn conditional_branch_output_unusable_outside() {
+        let a = node("a", Some(("branch_result", "String", vec![])));
+        let cond = CirNode { kind: CirNodeKind::Conditional, node_id: "cond".into(), capability: None,
+            output: None, children: vec!["a".into()], else_children: vec![], inputs: HashMap::new(),
+            input_types: HashMap::new(), control: Some(ControlSpec { condition: Some(ConditionSpec { expression: "true".into() }), loop_spec: None, retry: None }) };
+        let mut after = node("after", None);
+        after.inputs.insert("code".into(), serde_json::Value::String("x = ${branch_result}".into()));
+        let root = seq_root(vec!["cond", "after"]);
+        let err = validate_data_contract(&program(vec!["root"], vec![root, cond, a, after])).unwrap_err();
+        assert!(matches!(err, CompilerError::UnresolvedBinding { .. }));
+    }
+
+    #[test]
+    fn type_mismatch_rejected_but_number_integer_compatible() {
+        let a = node("a", Some(("stats", "CsvAnalysisResult", vec![])));
+        let mut b = node("b", None);
+        b.inputs.insert("stats".into(), serde_json::Value::String("${stats}".into()));
+        b.input_types.insert("stats".into(), "OtherType".into());
+        let root = seq_root(vec!["a", "b"]);
+        let err = validate_data_contract(&program(vec!["root"], vec![root.clone(), a.clone(), b.clone()])).unwrap_err();
+        assert!(matches!(err, CompilerError::DataContractViolation { .. }));
+        b.input_types.insert("stats".into(), "number".into());
+        // producer declares CsvAnalysisResult — not numeric: still violation
+        let err = validate_data_contract(&program(vec!["root"], vec![root.clone(), a.clone(), b.clone()])).unwrap_err();
+        assert!(matches!(err, CompilerError::DataContractViolation { .. }));
+        // exact match passes
+        b.input_types.insert("stats".into(), "CsvAnalysisResult".into());
+        assert!(validate_data_contract(&program(vec!["root"], vec![root, a, b])).is_ok());
     }
 }
