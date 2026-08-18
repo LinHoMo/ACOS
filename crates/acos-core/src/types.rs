@@ -282,6 +282,29 @@ pub struct ControlSpec {
     pub retry: Option<RetryPolicy>,
 }
 
+/// A declared output binding with its data contract.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputSpec {
+    /// Binding name referenced by consumers (`${name}`).
+    pub name: String,
+    /// Declared type name (e.g. `CsvAnalysisResult`, `List<CsvAnalysisResult>`).
+    pub type_name: String,
+    /// Field-level schema for record types (R4). May be empty.
+    #[serde(default)]
+    pub fields: Vec<FieldSpec>,
+}
+
+/// A single field declaration inside an `OutputSpec`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldSpec {
+    /// Field name reachable via dotted path (`${name.field}`).
+    pub name: String,
+    /// Declared field type: Number | Integer | String | Boolean | List | Record | Any.
+    pub type_name: String,
+}
+
 /// A single node in the CIR graph.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -293,8 +316,12 @@ pub struct CirNode {
     /// Invoked primitive capability id (e.g. `"read_file"`), if any.
     /// This is how the runtime resolves the primitive via the registry.
     pub capability: Option<String>,
-    /// Named output binding, if any.
-    pub output: Option<String>,
+    /// Named output binding with its data contract, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<OutputSpec>,
+    /// Expected type name per input key (R3). Optional.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub input_types: std::collections::HashMap<String, String>,
     /// Child node ids (for sequence/parallel/conditional/loop).
     pub children: Vec<String>,
     /// False branch for `Conditional` nodes (true branch is `children`).
@@ -427,5 +454,28 @@ mod tests {
         let json = serde_json::to_string(&p).unwrap();
         let back: RecoveryProposal = serde_json::from_str(&json).unwrap();
         assert_eq!(back, p);
+    }
+
+    #[test]
+    fn cir_node_output_spec_round_trip() {
+        let node: CirNode = serde_json::from_str(
+            r#"{"kind":"primitive_invocation","nodeId":"a","capability":"read_file",
+            "output":{"name":"doc","typeName":"Document","fields":[]},
+            "children":[],"inputs":{}}"#,
+        )
+        .unwrap();
+        assert_eq!(node.output.as_ref().unwrap().name, "doc");
+        assert_eq!(node.output.as_ref().unwrap().type_name, "Document");
+        let back = serde_json::to_string(&node).unwrap();
+        assert!(back.contains("\"output\":{\"name\":\"doc\",\"typeName\":\"Document\",\"fields\":[]}"));
+    }
+
+    #[test]
+    fn cir_node_missing_output_still_deserializes() {
+        let node: CirNode = serde_json::from_str(
+            r#"{"kind":"sequence","nodeId":"root","capability":null,"output":null,"children":[],"inputs":{}}"#,
+        )
+        .unwrap();
+        assert!(node.output.is_none());
     }
 }
