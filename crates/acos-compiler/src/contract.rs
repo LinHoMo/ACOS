@@ -159,36 +159,7 @@ pub fn validate_data_contract(program: &CirProgram) -> Result<(), CompilerError>
     fn check_node(node: &CirNode, scope: &HashMap<String, OutputSpec>) -> Result<(), CompilerError> {
         for (key, val) in &node.inputs {
             for raw in extract_refs(val) {
-                let mut parts = raw.split('.');
-                let name = parts.next().unwrap_or("");
-                if name.contains('[') || name.contains(']') {
-                    return Err(CompilerError::DataContractViolation {
-                        node_id: node.node_id.clone(),
-                        message: format!("binding '{name}' uses dynamic indexing, not supported in Phase 1"),
-                    });
-                }
-                let spec = scope.get(name);
-                let Some(spec) = spec else {
-                    return Err(CompilerError::UnresolvedBinding { node_id: node.node_id.clone(), binding: name.to_string() });
-                };
-                for field in parts {
-                    if field.contains('[') || field.contains(']') {
-                        return Err(CompilerError::DataContractViolation {
-                            node_id: node.node_id.clone(),
-                            message: format!("field '{field}' of '{name}' uses dynamic indexing, not supported in Phase 1"),
-                        });
-                    }
-                    let f = spec.fields.iter().find(|f| f.name == field).ok_or_else(|| CompilerError::DataContractViolation {
-                        node_id: node.node_id.clone(),
-                        message: format!("binding '{name}' has no field '{field}'"),
-                    })?;
-                    if f.type_name == "List" || f.type_name == "Record" {
-                        return Err(CompilerError::DataContractViolation {
-                            node_id: node.node_id.clone(),
-                            message: format!("field '{field}' of '{name}' requires indexing (Phase 2)"),
-                        });
-                    }
-                }
+                let spec = check_ref(node, &raw, scope)?;
                 if let Some(expected) = node.input_types.get(key) {
                     if expected != &spec.type_name && !(expected == "number" && spec.type_name == "integer") && !(expected == "integer" && spec.type_name == "number") {
                         return Err(CompilerError::DataContractViolation {
@@ -199,16 +170,61 @@ pub fn validate_data_contract(program: &CirProgram) -> Result<(), CompilerError>
                 }
             }
         }
+        // R1 also covers control references (loop_spec.input, condition
+        // expressions, retry config): scan the serialized control spec the
+        // same way as inputs. input_types do not apply to control fields.
+        if let Some(control) = &node.control {
+            if let Ok(value) = serde_json::to_value(control) {
+                for raw in extract_refs(&value) {
+                    check_ref(node, &raw, scope)?;
+                }
+            }
+        }
         Ok(())
     }
 
+    // R1 resolution + R4 field paths for a single `${...}` reference.
+    // Returns the resolved producer spec (used by the caller for R3 checks).
+    fn check_ref<'a>(node: &CirNode, raw: &str, scope: &'a HashMap<String, OutputSpec>) -> Result<&'a OutputSpec, CompilerError> {
+        let mut parts = raw.split('.');
+        let name = parts.next().unwrap_or("");
+        if name.contains('[') || name.contains(']') {
+            return Err(CompilerError::DataContractViolation {
+                node_id: node.node_id.clone(),
+                message: format!("binding '{name}' uses dynamic indexing, not supported in Phase 1"),
+            });
+        }
+        let spec = scope.get(name).ok_or_else(|| CompilerError::UnresolvedBinding { node_id: node.node_id.clone(), binding: name.to_string() })?;
+        for field in parts {
+            if field.contains('[') || field.contains(']') {
+                return Err(CompilerError::DataContractViolation {
+                    node_id: node.node_id.clone(),
+                    message: format!("field '{field}' of '{name}' uses dynamic indexing, not supported in Phase 1"),
+                });
+            }
+            let f = spec.fields.iter().find(|f| f.name == field).ok_or_else(|| CompilerError::DataContractViolation {
+                node_id: node.node_id.clone(),
+                message: format!("binding '{name}' has no field '{field}'"),
+            })?;
+            if f.type_name == "List" || f.type_name == "Record" {
+                return Err(CompilerError::DataContractViolation {
+                    node_id: node.node_id.clone(),
+                    message: format!("field '{field}' of '{name}' requires indexing (Phase 2)"),
+                });
+            }
+        }
+        Ok(spec)
+    }
+
+    // Sibling entries share one top-level scope (declared entry order, not
+    // node array order): earlier entries' outputs are visible to later
+    // entries' own references (e.g. a loop entry whose input comes from a
+    // producer entry).
+    let mut top_scope: HashMap<String, OutputSpec> = HashMap::new();
     for e in &entry_nodes {
-        let mut scope: HashMap<String, OutputSpec> = HashMap::new();
-        check_node(e, &scope)?;
-        let produced = walk(e, &by_id, &mut scope, &producers)?;
-        scope.extend(produced);
-        // sibling entries share the top-level scope; check remaining nodes through walk
-        // (children are checked inside walk; here we re-check the entry's own refs only)
+        check_node(e, &top_scope)?;
+        let produced = walk(e, &by_id, &mut top_scope, &producers)?;
+        top_scope.extend(produced);
     }
     // Final sweep: every node checked with the program-wide producer map for
     // R1 (binding must exist somewhere) — scoping is enforced by walk.
@@ -288,7 +304,21 @@ mod tests {
     }
 
     #[test]
+    fn loop_input_reference_must_resolve() {
+        let mut body = node("body", Some(("per", "String", vec![])));
+        let mut loop_node = CirNode { kind: CirNodeKind::LoopMap, node_id: "loop".into(), capability: None,
+            output: None, children: vec!["body".into()], else_children: vec![], inputs: HashMap::new(),
+            input_types: HashMap::new(), control: Some(ControlSpec { condition: None,
+                loop_spec: Some(LoopSpec { kind: LoopKind::ForEach, condition: None, max_iterations: None,
+                    input: Some("${missing_items}".into()), item_var: Some("item".into()) }), retry: None }) };
+        let mut root = seq_root(vec!["loop"]);
+        let err = validate_data_contract(&program(vec!["root"], vec![root, loop_node, body])).unwrap_err();
+        assert!(matches!(err, CompilerError::UnresolvedBinding { ref binding, .. } if binding == "missing_items"));
+    }
+
+    #[test]
     fn item_var_visible_inside_loop_body_not_outside() {
+        let src = node("src", Some(("items", "List<String>", vec![])));
         let mut body = node("body", Some(("per", "String", vec![])));
         body.inputs.insert("text".into(), serde_json::Value::String("${item}".into()));
         let mut loop_node = CirNode { kind: CirNodeKind::LoopMap, node_id: "loop".into(), capability: None,
@@ -296,17 +326,18 @@ mod tests {
             input_types: HashMap::new(), control: Some(ControlSpec { condition: None,
                 loop_spec: Some(LoopSpec { kind: LoopKind::ForEach, condition: None, max_iterations: None,
                     input: Some("${items}".into()), item_var: Some("item".into()) }), retry: None }) };
-        let mut root = seq_root(vec!["loop"]);
-        assert!(validate_data_contract(&program(vec!["root"], vec![root.clone(), loop_node.clone(), body.clone()])).is_ok());
+        let mut root = seq_root(vec!["src", "loop"]);
+        assert!(validate_data_contract(&program(vec!["root"], vec![root.clone(), src.clone(), loop_node.clone(), body.clone()])).is_ok());
         let mut after = node("after", None);
         after.inputs.insert("code".into(), serde_json::Value::String("x = ${item}".into()));
-        let mut root2 = seq_root(vec!["loop", "after"]);
-        let err = validate_data_contract(&program(vec!["root"], vec![root2, loop_node, body, after])).unwrap_err();
+        let mut root2 = seq_root(vec!["src", "loop", "after"]);
+        let err = validate_data_contract(&program(vec!["root"], vec![root2, src, loop_node, body, after])).unwrap_err();
         assert!(matches!(err, CompilerError::UnresolvedBinding { .. }));
     }
 
     #[test]
     fn item_var_shadowing_top_level_binding_rejected() {
+        let files = node("files_src", Some(("files", "List<String>", vec![])));
         let mut src = node("src", Some(("file_path", "String", vec![])));
         let mut body = node("body", Some(("per", "String", vec![])));
         let mut loop_node = CirNode { kind: CirNodeKind::LoopMap, node_id: "loop".into(), capability: None,
@@ -314,13 +345,14 @@ mod tests {
             input_types: HashMap::new(), control: Some(ControlSpec { condition: None,
                 loop_spec: Some(LoopSpec { kind: LoopKind::ForEach, condition: None, max_iterations: None,
                     input: Some("${files}".into()), item_var: Some("file_path".into()) }), retry: None }) };
-        let mut root = seq_root(vec!["src", "loop"]);
-        let err = validate_data_contract(&program(vec!["root"], vec![root, src, loop_node, body])).unwrap_err();
+        let mut root = seq_root(vec!["files_src", "src", "loop"]);
+        let err = validate_data_contract(&program(vec!["root"], vec![root, files, src, loop_node, body])).unwrap_err();
         assert!(matches!(err, CompilerError::DataContractViolation { .. }));
     }
 
     #[test]
     fn loop_aggregate_type_must_be_list_of_last_child_type() {
+        let src = node("src", Some(("items", "List<String>", vec![])));
         let mut body = node("body", Some(("vr", "ValidationResult", vec![])));
         let mut loop_node = CirNode { kind: CirNodeKind::LoopMap, node_id: "loop".into(), capability: None,
             output: Some(OutputSpec { name: "all_results".into(), type_name: "List<ValidationResult>".into(), fields: vec![] }),
@@ -328,10 +360,10 @@ mod tests {
             input_types: HashMap::new(), control: Some(ControlSpec { condition: None,
                 loop_spec: Some(LoopSpec { kind: LoopKind::ForEach, condition: None, max_iterations: None,
                     input: Some("${items}".into()), item_var: Some("item".into()) }), retry: None }) };
-        let mut root = seq_root(vec!["loop"]);
-        assert!(validate_data_contract(&program(vec!["root"], vec![root.clone(), loop_node.clone(), body.clone()])).is_ok());
+        let mut root = seq_root(vec!["src", "loop"]);
+        assert!(validate_data_contract(&program(vec!["root"], vec![root.clone(), src.clone(), loop_node.clone(), body.clone()])).is_ok());
         loop_node.output.as_mut().unwrap().type_name = "ValidationResult".into();
-        let err = validate_data_contract(&program(vec!["root"], vec![root, loop_node, body])).unwrap_err();
+        let err = validate_data_contract(&program(vec!["root"], vec![root, src, loop_node, body])).unwrap_err();
         assert!(matches!(err, CompilerError::DataContractViolation { .. }));
     }
 

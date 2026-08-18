@@ -120,3 +120,49 @@ CIR 使用 `serde(rename_all = "camelCase")`，注意转换规则只作用于下
 
 每次重规划提交为事务式补丁（`replan.started` / `replan.completed` / `replan.rejected`），补丁根节点必须复用被替换节点的 `node_id`。
 `bench` 套件以 fixture 为契约验证上述行为（见 `crates/acos-bench/fixtures/`）。
+
+## Stage Data Contract（P1-5B Formal / Phase 1 新增）
+
+**代码锚点**: `crates/acos-compiler/src/contract.rs`（`validate_data_contract`，经 `validate_cir_semantic` 挂入编译期校验）
+**设计**: `docs/specs/2026-08-18-stage-data-contract-design.md`
+
+数据契约把"阶段间存在某个输出"从运行时假设前移到编译期校验：未解析绑定 / 契约违规在 Compile 期报错并进入 repair 循环，而不是运行到 Python 才崩溃（`NameError` / `KeyError` / `NoneType.strip` 属此层）。校验规则 R1–R5：
+
+| 规则 | 内容 |
+| --- | --- |
+| R1 | Binding 存在性：所有 `${...}` 引用（input 值 + control 字段）必须解析到某个 producer 的 `output.name` 或 loop 的 `item_var`；未解析 → `UnresolvedBinding` |
+| R2 | Producer ordering（结构可达性，非节点数组顺序）：Sequence 渐进（前序输出对后序可见）；Parallel 分支间不共享，但块完成后输出对后续可见；Conditional 分支内产生的绑定**不能**在节点外部假设存在 |
+| R3 | Type alignment：声明了 `inputTypes` 的 input 必须与 producer `typeName` 严格一致（number/integer 互相宽松兼容）；未声明的只查 binding 存在 |
+| R4 | Field path：只允许静态字段路径 `identifier.field.field`，字段必须存在于 producer `fields` 且类型兼容；含 `[`/`]` 的动态索引**拒绝**（Phase 2） |
+| R5 | Output completeness：有输出必有完整 schema（`name` 与 `typeName` 均非空），拒绝 `typeName: ""` 等半合法状态 |
+
+### `output` 结构体化
+
+`output` 现在是 `OutputSpec { name, typeName, fields }`（`fields: Vec<FieldSpec { name, typeName }>`）。Rust 类型强制"有输出必有 schema"。新增 `inputTypes`（input key → 期望类型名，可选）。
+
+### Loop 聚合输出类型
+
+`loop_map.output`（聚合）类型必须是 **`List<T>`**，T = body **最后一个**声明 output 的 child 类型。例如 `all_results: List<ValidationResult>`：
+
+- `${all_results.total_issues}` → **编译期 FAIL**（List 无字段）
+- `${all_results[0].total_issues}` → Phase 1 不支持（Phase 2）
+
+### 点路径（R4 细节与 Phase 1 边界）
+
+`${a.b.c}` 是静态字段路径，按 producer 的 `fields` 表逐层校验。**Phase 1 边界：路径不下降**——字段表是平面的，`${a.b.c}` 第二层以 `a` 的顶层字段表校验。含 `[`/`]` 的动态索引被拒绝。
+
+### item_var 作用域
+
+- `item_var` 在 loop body 内可见；loop 外引用 → unresolved。
+- `item_var` 不能覆盖已存在的顶层 binding（遮蔽 → `DataContractViolation`）。
+- 严格 shadowing / lexical scope 留 Phase 2。
+
+### control 引用校验
+
+control 中的引用（`loopSpec.input`、condition 表达式、retry 配置等）与 input 值**同样受 R1 校验**：dangling loop input 会在编译期报 `UnresolvedBinding`，不再拖到 runtime。
+
+### 架构原则（记录，Phase 2 落地）
+
+> Runtime values should cross stage boundaries as structured data, not source-code interpolation.
+
+当前 `${all_results}` 通过字符串插值拼进 Python 源码；正确形态是 Binding Resolver → Typed Runtime Value → 结构化传递（stdin/JSON/env）。Phase 1 仅记录此原则；同时 Phase 1 不保证把绑定嵌入任意源码的语义/语法安全（代码生成正确性属 Phase 2 structured transport 职责）。

@@ -129,6 +129,7 @@
 - [ ] **P1-5B Formal Branch** 🔬 IN PROGRESS
   - 建议纳入：执行失败反馈进 repair 循环、schema 事实入 Compile Context、输出要求接地以改善 L3 验证
   - 前置工程问题：Generated-code data contract（见 Known Limitation）
+- [x] **Stage Data Contract Phase 1 已完成**（编译期 R1–R5，见 `docs/specs/2026-08-18-stage-data-contract-design.md`）
 
 **P1-5B 过程中的运行时/编译器修复**（P1-5B-A 之外）：
 - [x] `acos-llm`：`max_tokens` 可配置（`ACOS_LLM_MAX_TOKENS`，默认 32768）— 修复 LongCat-2.0 thinking 吞掉输出预算导致空响应
@@ -220,7 +221,7 @@ cargo run -p acos-cli -- run-cir <cir.json> [--env <env.json>] [--verify <ground
 - Baseline 当前使用 flat conversation（非 true multi-turn API），v0.2 足够但长期可改进
 - **ModelCompiler 前端已修复**（P1-5A 完成，FROZEN/PASS）
 - P1-5B Discovery Probe 完成（Probe-1 不支持命题 B；Probe-2 支持"Prompt/Context Contract 是主要混淆变量"的判断，尚不足以单独证明通用 Cognitive Program Discovery；决策走 Formal P1-5B）
-- **Generated-code data contract**：`execute_python` 阶段间无 schema/type 契约（`${all_results}`、`${processed_data}`、key 名、列名假设），`KeyError`/`NameError`/`NoneType.strip` 属此层；作为独立工程问题处理（P1-5B Formal Branch 前置）
+- **Generated-code data contract**：`execute_python` 阶段间无 schema/type 契约（`${all_results}`、`${processed_data}`、key 名、列名假设），`KeyError`/`NameError`/`NoneType.strip` 属此层；作为独立工程问题处理（P1-5B Formal Branch 前置）。**Phase 1 已实施静态契约部分**（编译期 R1–R5：binding 存在性、结构可达性、类型对齐、字段路径、输出 schema 完整性），**Phase 2 structured transport（stdin/JSON/env 结构化传递）待做**
 
 ## 第一轮实验结果（P1-R1，已冻结）
 
