@@ -1,8 +1,10 @@
 # SUCCESS-004: P1 第一轮实验 — ACOS vs Direct Tool-Loop Baseline
 
 **Date**: 2025-08-18
-**Status**: COMPLETE — 数据支持核心假设
+**Status**: FROZEN — P1-R1
 **Scope**: ACOS RuleCompiler × 5 vs Baseline × 5 vs ModelCompiler × 1
+
+> **FROZEN**: 本文档为 P1-R1 基线实验的历史记录，数据与结论不再修改。后续实验另开 SUCCESS-005 等文档。
 
 ## 实验目标
 
@@ -119,19 +121,33 @@ ModelCompiler 在第一次尝试时就因 LLM 返回空 JSON 而失败。这是�
 
 ## 结论
 
-### 核心假设成立
+### 命题 A 获得初步验证
 
-**Cognitive Compilation 确实产生了可测量的价值。**
+> 对于 P1-FLAGSHIP-001 这类具有明确输出契约的结构化分析任务，ACOS 的确定性 RuleCompiler 生成的 Cognitive Program 在可靠性上显著优于 Direct Tool-Loop Baseline（5/5 vs 0/5，Fisher 精确检验 p ≈ 0.0079）。
 
-简单的确定性 RuleCompiler 生成的程序：
-- 100% 通过验证
-- 零方差（确定性）
+该结果**支持命题 A**（结构化程序 + 可靠执行 + 验证 > 直接 Tool Loop），但**尚未验证命题 B**（编译器能自动发现合理的 Cognitive Program 结构）。
+
+### 命题框架
+
+| 命题 | 定义 | 当前状态 |
+|------|------|----------|
+| **A**: 程序化编译 + 可验证执行 > 直接工具调用 | 给定一个正确的 Cognitive Program，Runtime + Verifier 的执行可靠性高于 LLM 直接调用工具 | ✅ P1-R1 初步支持 |
+| **B**: 编译器能自动发现合理程序结构 | 给定任务描述，ModelCompiler 能生成语义合理的 CIR（不需要人类预先编写该任务的具体流程） | ⏳ 待验证（ModelCompiler 当前不可用） |
+
+### 关键观察
+
+**RuleCompiler 路径**（确定性）：
+- 5/5 通过验证
+- 输出方差为 0（RuleCompiler 是确定性程序，相同输入必然产生相同 CIR；这是其设计属性，不代表 ACOS 系统在更广泛任务空间上的稳定性）
 - 不受 LLM 输出不稳定的影响
 
-而 Direct Tool-Loop Baseline：
-- 0% 通过验证
-- 高方差（duration 从 105s 到 248s）
-- 每次都"自信地"失败
+**Baseline 路径**（Direct Tool-Loop）：
+- 0/5 通过验证
+- 高方差（duration 从 105s 到 248s，LLM 调用 4-11 次）
+- 每次都"自信地"失败（self-reported 5/5 vs verified 0/5）
+
+**Completion Illusion 现象**：
+Baseline 的 self-reported success (100%) 与 verified success (0%) 之间存在 100 个百分点的差距。这不是模型"没有做工作"——它确实执行了分析、识别了异常——但它无法准确判断自己是否真正完成了任务。这一发现直接支持了 ACOS 的核心设计原则："完成"必须由 Runtime + Verification 共同决定，而非 Agent 自我声明。
 
 ### 下一步优先级
 
@@ -173,4 +189,4 @@ tests/benchmarks/p1/flagship_csv_quality/experiments/run_records/
 
 ---
 
-**Conclusion**: 第一轮实验数据强有力地支持了 ACOS 的核心假设。下一步是修复 ModelCompiler 以完成三方对比。
+**Conclusion**: P1-R1 数据支持命题 A。下一步是实施 P1-5A（ModelCompiler Frontend Robustness），使 ModelCompiler 成为可靠的编译器前端，为命题 B 的实验奠定基础。

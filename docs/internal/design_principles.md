@@ -39,3 +39,36 @@
 ## 8. 模型可见即已记录 / Model-visible means logged
 
 任何到达模型请求的输入都必须能从事件日志重建。这是可复现性和可审计性的基础保证——如果不遵守此不变量，就无法复现过去的运行、无法审计模型决策、无法完整验证。
+
+## 9. 完成是外部验证状态 / Completion is an external verification state
+
+Agent 的自我声明只能表示 `self_reported_success`，不能直接决定任务完成。`task_success` 必须由 Runtime 执行状态与独立 Verification 结果共同决定。
+
+**动机**：P1-R1 实验（`SUCCESS-004`）中，Direct Tool-Loop Baseline 的 self-reported success 为 100%（5/5），但 verified success 为 0%（0/5）。模型每次都"认为"自己完成了任务，但实际上从未产出符合规范的输出。这种 **Completion Illusion** 是 LLM Agent 的系统性缺陷。
+
+**状态模型**：
+
+```text
+RUNNING
+  ↓
+EXECUTION_COMPLETED      ← maps to self_reported_success
+  ↓
+VERIFICATION             ← 独立验证器判定
+  ├── PASS → SUCCEEDED   ← maps to verified_success / task_success
+  └── FAIL → FAILED / RECOVERABLE
+```
+
+**四个术语的严格对应**：
+
+| 术语 | 产生方 | 含义 | 不应作为 |
+|------|--------|------|----------|
+| `self_reported_success` | Agent 内部 | "我认为我做完了" | 任务完成的充分条件 |
+| `execution_completed` | Runtime | 程序执行完毕，无 panic | 输出正确的证据 |
+| `verified_success` | Verifier | 输出通过独立验证 | —— |
+| `task_success` | 系统对外 | = `verified_success`，唯一可信的完成状态 | —— |
+
+**设计约束**：
+- Runtime 必须区分 `execution_completed`（程序跑完）与 `verification_passed`（输出正确）
+- Verifier 必须独立于 Agent 的执行逻辑（不能复用 Agent 自己的判断）
+- 实验报告必须同时记录 self-reported 与 verified 两个指标
+- 任何外部系统（UI、API、下游任务）只能依赖 `verified_success` / `task_success`
