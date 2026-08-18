@@ -75,22 +75,26 @@
 - [ ] 使用相同 flagship 任务 + 相同验证器
 - [ ] 对比 ACOS vs 手写脚本
 
-### P1-5A ModelCompiler Frontend Robustness ✅ 实现完成，待 live smoke test
+### P1-5A ModelCompiler Frontend Robustness ✅ FROZEN / PASS
 
 > **目标**：让 ModelCompiler 成为一个可靠的编译器前端，能处理 LLM 的各种异常输出。
 
-- [x] 错误分类体系（JsonSyntaxError / MissingRequiredField / UnknownCapability / InvalidReference / InvalidControlSemantics / InvalidEffect）
+- [x] 错误分类体系（7 个具体变体）
 - [x] Repair Prompt 机制（把具体 validator error 反馈给模型重试）
 - [x] 重试状态机（JSON 提取 → Schema 校验 → CIR 验证 → Repair → 最多 3 次）
-- [x] Compiler Robustness Suite（9 个测试用例覆盖各类错误 + 6 个语义验证测试）
+- [x] Compiler Robustness Suite（9 个测试用例 + 6 个语义验证测试）
 - [x] 明确 CompilerFailure（RepairExhausted 包含完整诊断链）
-- [ ] **下一步**：用真实 LONGCAT_API_KEY 做 live smoke test（3 个 case：S1 合法 / S2 控制流 / S3 复杂）
+- [x] Live smoke test 3/3 通过（见 `experiments/smoke/P1-5A-live-smoke-2026-08-18.md`）
 
-**验收线**：
-- 合法输出 → 接受
-- 可修复错误 → Repair → Validate → 成功
-- 不可修复错误 → 有界重试 → 明确 CompilerFailure
-- 任何情况不允许 panic / 无限重试 / 绕过 Validator
+**Smoke Test 数据**：
+| 指标 | 值 |
+|------|----|
+| 首次成功率 | 33% (1/3) |
+| Repair 成功率 | 100% (2/2) |
+| 最终成功率 | 100% (3/3) |
+| 平均延迟 | ~112s |
+
+**已知限制**：首次模型响应为空（EOF）概率较高，属于模型/API 稳定性问题，不影响编译器机制正确性。
 
 ### P1-5B Cognitive Program Discovery ⬜
 
@@ -201,17 +205,17 @@ ModelCompiler:      0/1 (编译器失败，LLM 返回空/无效输出)
 
 ## 尚未开始 / Not yet started
 
-### 当前优先级：P1-5A Live Smoke Test
+### 当前优先级：P1-5B Cognitive Program Discovery
 
-- [ ] 用真实 LONGCAT_API_KEY 跑 3 个 smoke case（S1 合法 / S2 控制流 / S3 复杂）
-- [ ] 记录首次成功率、Repair 触发率、平均 Repair 次数
-- [ ] 保存每次 raw_response + diagnostics + final CIR
-- [ ] 通过后冻结 P1-5A，进入 P1-5B
+- [ ] 设计 Compiler Discovery Probe（旗舰任务，无 Workflow 提示）
+- [ ] 定义 Behavioral Requirements（非结构要求）
+- [ ] 实现 4 个核心指标：Compile Success / Program Success / Verified Success / Program Adequacy
+- [ ] 额外记录 Compiler Repair Tax（repair_count / latency / token_cost）
+- [ ] 跑 ACOS(ModelCompiler) × 5 对比 RuleCompiler × 5
 
 ### 后续计划
 
-- **P1-5B** Cognitive Program Discovery（等 P1-5A 完成）
-- **P1-4** Fixed Workflow Baseline（等 P1-5A 完成，作为 Expert Workflow Reference）
+- **P1-4** Fixed Workflow Baseline（等 P1-5B 完成，作为 Expert Workflow Reference）
 - Effect System（副作用声明与权限）
 - 经验回路（Phase 3，feature flag `experience-feedback`）
 - SQLite 持久化存储（Phase 2）
