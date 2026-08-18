@@ -12,7 +12,10 @@ cir:
     - nodeId: "A"
       kind: primitive_invocation
       capability: write_file
-      output: marker
+      output:
+        name: marker
+        typeName: String
+        fields: []
       children: []
       inputs:
         path: "{workspace}/marker.txt"
@@ -30,14 +33,20 @@ cir:
     - nodeId: "C"
       kind: primitive_invocation
       capability: summarize
-      output: summary2
+      output:
+        name: summary2
+        typeName: String
+        fields: []
       children: []
       inputs:
         text: "then-branch"
     - nodeId: "D"
       kind: primitive_invocation
       capability: write_file
-      output: marker2
+      output:
+        name: marker2
+        typeName: String
+        fields: []
       children: []
       inputs:
         path: "{workspace}/else.txt"

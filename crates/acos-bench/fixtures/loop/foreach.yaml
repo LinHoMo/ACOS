@@ -12,7 +12,10 @@ cir:
     - nodeId: "src"
       kind: primitive_invocation
       capability: list_source
-      output: items
+      output:
+        name: items
+        typeName: StringList
+        fields: []
       children: []
       inputs: {}
     - nodeId: "loop"
@@ -29,7 +32,10 @@ cir:
     - nodeId: "body"
       kind: primitive_invocation
       capability: summarize
-      output: per_item
+      output:
+        name: per_item
+        typeName: String
+        fields: []
       children: []
       inputs:
         text: "{$item}"

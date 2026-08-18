@@ -14,7 +14,10 @@ cir:
     - nodeId: "search"
       kind: primitive_invocation
       capability: flaky_search
-      output: results
+      output:
+        name: results
+        typeName: String
+        fields: []
       children: []
       inputs:
         query: "acos"

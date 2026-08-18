@@ -39,7 +39,17 @@
       "kind": "primitive_invocation",
       "nodeId": "validate",
       "capability": "execute_python",
-      "output": "validation_result",
+      "output": {
+        "name": "validation_result",
+        "typeName": "ValidationResult",
+        "fields": [
+          {"name": "path", "typeName": "String"},
+          {"name": "has_error", "typeName": "Boolean"},
+          {"name": "issues", "typeName": "List"},
+          {"name": "row_count", "typeName": "Integer"},
+          {"name": "columns", "typeName": "List"}
+        ]
+      },
       "children": [],
       "elseChildren": [],
       "inputs": {
@@ -62,7 +72,15 @@
       "kind": "primitive_invocation",
       "nodeId": "repair",
       "capability": "execute_python",
-      "output": "repaired_content",
+      "output": {
+        "name": "repaired_content",
+        "typeName": "RepairResult",
+        "fields": [
+          {"name": "path", "typeName": "String"},
+          {"name": "repaired", "typeName": "Boolean"},
+          {"name": "rows_cleaned", "typeName": "Integer"}
+        ]
+      },
       "children": [],
       "elseChildren": [],
       "inputs": {
@@ -73,7 +91,15 @@
       "kind": "primitive_invocation",
       "nodeId": "no_repair_needed",
       "capability": "execute_python",
-      "output": "repaired_content",
+      "output": {
+        "name": "repaired_content",
+        "typeName": "RepairResult",
+        "fields": [
+          {"name": "path", "typeName": "String"},
+          {"name": "repaired", "typeName": "Boolean"},
+          {"name": "rows_cleaned", "typeName": "Integer"}
+        ]
+      },
       "children": [],
       "elseChildren": [],
       "inputs": {
@@ -84,7 +110,16 @@
       "kind": "primitive_invocation",
       "nodeId": "analyze_with_retry",
       "capability": "execute_python",
-      "output": "file_analysis",
+      "output": {
+        "name": "file_analysis",
+        "typeName": "FileAnalysis",
+        "fields": [
+          {"name": "path", "typeName": "String"},
+          {"name": "total_revenue", "typeName": "Number"},
+          {"name": "row_count", "typeName": "Integer"},
+          {"name": "category_counts", "typeName": "Record"}
+        ]
+      },
       "children": [],
       "elseChildren": [],
       "inputs": {
@@ -103,7 +138,14 @@
       "kind": "primitive_invocation",
       "nodeId": "merge_report",
       "capability": "write_file",
-      "output": "report_ref",
+      "output": {
+        "name": "report_ref",
+        "typeName": "ArtifactRef",
+        "fields": [
+          {"name": "id", "typeName": "String"},
+          {"name": "path", "typeName": "String"}
+        ]
+      },
       "children": [],
       "elseChildren": [],
       "inputs": {

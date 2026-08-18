@@ -12,7 +12,10 @@ cir:
     - nodeId: "A"
       kind: primitive_invocation
       capability: search
-      output: search_results
+      output:
+        name: search_results
+        typeName: StringList
+        fields: []
       children: []
       inputs:
         query: "acos"
@@ -28,7 +31,10 @@ cir:
     - nodeId: "C"
       kind: primitive_invocation
       capability: summarize
-      output: summary
+      output:
+        name: summary
+        typeName: String
+        fields: []
       children: []
       inputs:
         text: "{$search_results}"

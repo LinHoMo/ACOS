@@ -11,7 +11,10 @@ cir:
     - nodeId: "A"
       kind: primitive_invocation
       capability: unstable_search
-      output: results
+      output:
+        name: results
+        typeName: String
+        fields: []
       children: []
       inputs:
         query: "acos"

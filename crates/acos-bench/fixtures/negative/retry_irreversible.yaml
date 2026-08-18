@@ -11,7 +11,10 @@ cir:
     - nodeId: "A"
       kind: primitive_invocation
       capability: irreversible
-      output: done
+      output:
+        name: done
+        typeName: String
+        fields: []
       children: []
       inputs: {}
       control:

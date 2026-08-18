@@ -12,7 +12,10 @@ cir:
     - nodeId: "init"
       kind: primitive_invocation
       capability: summarize
-      output: out
+      output:
+        name: out
+        typeName: String
+        fields: []
       children: []
       inputs:
         text: "seed"
@@ -30,7 +33,10 @@ cir:
     - nodeId: "body"
       kind: primitive_invocation
       capability: summarize
-      output: out
+      output:
+        name: out
+        typeName: String
+        fields: []
       children: []
       inputs:
         text: "{$out}"
