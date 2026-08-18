@@ -60,10 +60,14 @@
 
 - [x] 最朴素的 LLM Agent：Goal → LLM → Tool Call → Tool Result → LLM → ...
 - [x] 相同工具集（read_file, write_file, execute_python）对齐 ACOS 原语
+- [x] **原生 tool calling**（Anthropic `tool_use`，非自定义 XML）
 - [x] 相同验证器（acos-verify 三层验证）
-- [x] 指标记录（latency, llm_calls, tool_calls, cost）
+- [x] 指标记录（latency, llm_calls, tool_calls, cost）+ 区分 self-reported / verified success
+- [x] 跨平台 Python 检测（Windows `where` / Unix `which`）
+- [x] 领域无关 System Prompt（不泄露任务类型）
 - [x] CLI `baseline` 子命令
 - [x] 修复 `check_evidence` 移除 `artifact.stored` 硬性要求
+- [x] v0.2 冻结，可开始真实实验
 
 ### P1-4 Fixed Workflow Baseline ⬜
 
@@ -148,6 +152,7 @@ cargo run -p acos-cli -- run-cir <cir.json> [--env <env.json>] [--verify <ground
 - Runtime 不发出 `artifact.stored` 事件（验证器已改为不要求此事件）
 - 当前 Golden CIR 仅用于 Runtime 验证，不代表 Compiler 能力
 - Baseline 端到端测试需 `LONGCAT_API_KEY`（无 key 时跳过）
+- Baseline 当前使用 flat conversation（非 true multi-turn API），v0.2 足够但长期可改进
 
 ## 尚未开始 / Not yet started
 

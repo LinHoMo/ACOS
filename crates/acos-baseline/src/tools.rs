@@ -93,11 +93,20 @@ pub async fn execute_tool(call: &ToolCall) -> ToolResult {
 async fn read_file(args: &serde_json::Value) -> ToolResult {
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
     if path.is_empty() {
-        return ToolResult { success: false, output: "read_file: missing 'path'".into() };
+        return ToolResult {
+            success: false,
+            output: "read_file: missing 'path'".into(),
+        };
     }
     match tokio::fs::read_to_string(path).await {
-        Ok(content) => ToolResult { success: true, output: content },
-        Err(e) => ToolResult { success: false, output: format!("read_file error: {e}") },
+        Ok(content) => ToolResult {
+            success: true,
+            output: content,
+        },
+        Err(e) => ToolResult {
+            success: false,
+            output: format!("read_file error: {e}"),
+        },
     }
 }
 
@@ -105,33 +114,47 @@ async fn write_file(args: &serde_json::Value) -> ToolResult {
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
     let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
     if path.is_empty() {
-        return ToolResult { success: false, output: "write_file: missing 'path'".into() };
+        return ToolResult {
+            success: false,
+            output: "write_file: missing 'path'".into(),
+        };
     }
     // Ensure parent directory exists
     if let Some(parent) = Path::new(path).parent() {
         let _ = tokio::fs::create_dir_all(parent).await;
     }
     match tokio::fs::write(path, content).await {
-        Ok(_) => ToolResult { success: true, output: format!("wrote {} bytes to {}", content.len(), path) },
-        Err(e) => ToolResult { success: false, output: format!("write_file error: {e}") },
+        Ok(_) => ToolResult {
+            success: true,
+            output: format!("wrote {} bytes to {}", content.len(), path),
+        },
+        Err(e) => ToolResult {
+            success: false,
+            output: format!("write_file error: {e}"),
+        },
     }
 }
 
 async fn execute_python(args: &serde_json::Value) -> ToolResult {
     let code = args.get("code").and_then(|v| v.as_str()).unwrap_or("");
     if code.is_empty() {
-        return ToolResult { success: false, output: "execute_python: missing 'code'".into() };
+        return ToolResult {
+            success: false,
+            output: "execute_python: missing 'code'".into(),
+        };
     }
 
-    // Find python interpreter (same logic as ACOS plugin)
-    let python = ["python3", "python", "py"]
-        .iter()
-        .find(|cmd| which(cmd))
-        .copied();
+    // Find python interpreter (cross-platform)
+    let python = find_python();
 
     let python = match python {
         Some(p) => p,
-        None => return ToolResult { success: false, output: "execute_python: no python interpreter found".into() },
+        None => {
+            return ToolResult {
+                success: false,
+                output: "execute_python: no python interpreter found".into(),
+            }
+        }
     };
 
     match tokio::process::Command::new(python)
@@ -144,38 +167,69 @@ async fn execute_python(args: &serde_json::Value) -> ToolResult {
             let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
             let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
             if output.status.success() {
-                ToolResult { success: true, output: stdout }
+                ToolResult {
+                    success: true,
+                    output: stdout,
+                }
             } else {
-                ToolResult { success: false, output: format!("python exited {:?}: {}", output.status.code(), stderr) }
+                ToolResult {
+                    success: false,
+                    output: format!("python exited {:?}: {}", output.status.code(), stderr),
+                }
             }
         }
-        Err(e) => ToolResult { success: false, output: format!("execute_python error: {e}") },
+        Err(e) => ToolResult {
+            success: false,
+            output: format!("execute_python error: {e}"),
+        },
     }
 }
 
-/// Checks if a command exists on PATH.
-fn which(cmd: &str) -> bool {
-    std::process::Command::new("where")
-        .arg(cmd)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or_else(|_| false)
+/// Cross-platform Python interpreter detection.
+#[cfg(windows)]
+fn find_python() -> Option<&'static str> {
+    ["python", "python3", "py"]
+        .iter()
+        .find(|cmd| {
+            std::process::Command::new("where")
+                .arg(cmd)
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        })
+        .copied()
 }
 
-/// Formats a tool call for the system prompt.
+/// Cross-platform Python interpreter detection.
+#[cfg(not(windows))]
+fn find_python() -> Option<&'static str> {
+    ["python3", "python"]
+        .iter()
+        .find(|cmd| {
+            std::process::Command::new("which")
+                .arg(cmd)
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        })
+        .copied()
+}
+
+/// Formats tool definitions for the system prompt.
 pub fn format_tools_for_prompt(tools: &[ToolDef]) -> String {
-    let mut s = String::from("You have access to the following tools:\n\n");
+    let mut s = String::from("## Available Tools\n\n");
+    s.push_str("To use a tool, call it using the native tool calling interface.\n\n");
     for tool in tools {
         s.push_str(&format!("### {}\n", tool.name));
         s.push_str(&format!("Description: {}\n", tool.description));
-        s.push_str(&format!("Parameters: {}\n\n", serde_json::to_string_pretty(&tool.parameters).unwrap_or_default()));
+        s.push_str(&format!(
+            "Parameters: {}\n\n",
+            serde_json::to_string_pretty(&tool.parameters)
+                .unwrap_or_default()
+        ));
     }
-    s.push_str("To call a tool, output ONLY a JSON object in this format:\n");
-    s.push_str("```<tool_call>{\"name\": \"tool_name\", \"arguments\": {...}}</tool_call>```\n\n");
-    s.push_str("To give your final answer, output the report directly without any tool call markup.\n");
     s
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -192,7 +246,10 @@ mod tests {
 
     #[tokio::test]
     async fn read_file_missing_path() {
-        let call = ToolCall { name: "read_file".into(), arguments: serde_json::json!({}) };
+        let call = ToolCall {
+            name: "read_file".into(),
+            arguments: serde_json::json!({}),
+        };
         let result = execute_tool(&call).await;
         assert!(!result.success);
     }
@@ -217,7 +274,11 @@ mod tests {
         };
         let result = execute_tool(&call).await;
         // Skip if python not available in test environment
-        if !result.success && (result.output.contains("no python") || result.output.contains("Python was not found") || result.output.contains("exited Some(9009)")) {
+        if !result.success
+            && (result.output.contains("no python")
+                || result.output.contains("Python was not found")
+                || result.output.contains("exited Some(9009)"))
+        {
             eprintln!("SKIP: python not available");
             return;
         }

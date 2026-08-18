@@ -1,14 +1,14 @@
-# SUCCESS-003: P1-3 Direct Tool-Loop Baseline v0.1
+# SUCCESS-003: P1-3 Direct Tool-Loop Baseline v0.2
 
 **Date**: 2025-08-18
-**Status**: PASS — baseline agent compiles, runs, and produces verifiable output
+**Status**: PASS — baseline frozen, ready for first real experiment
 **Scope**: Simplest LLM+Tools+Loop agent as empirical baseline for ACOS comparison
 
 ## Goal
 
 Build a **Direct Tool-Loop Agent** — the simplest possible LLM agent:
 - System prompt + tool definitions
-- LLM generates `<tool_call>JSON</tool_call>` markup
+- LLM uses **native tool calling** (Anthropic `tool_use`)
 - Agent executes tool, feeds result back to LLM
 - Loop until LLM outputs final report (no tool call)
 
@@ -26,223 +26,194 @@ Per P1 methodology, the following are frozen:
 | Max turns | 20 |
 | Max tokens | 4096 |
 | Tools | `read_file`, `write_file`, `execute_python` |
-| Tool call format | `<tool_call>{"name": "...", "arguments": {...}}</tool_call>` |
+| Tool call format | **Native Anthropic tool_use** (not custom XML) |
 | Verifier | `acos-verify` three-layer (Structural/Semantic/Evidence) |
-| Task | P1 flagship CSV quality analysis |
+| System prompt | Domain-agnostic (no task-specific hints) |
+
+## v0.2 Changes (from v0.1)
+
+### 1. Native Tool Calling (was custom XML parsing)
+
+**Problem**: v0.1 used `<tool_call>JSON</tool_call>` custom format, which added an artificial failure point and made the comparison unfair ("Direct Tool Loop + custom DSL" vs "ACOS").
+
+**Fix**: Now uses Anthropic native `tool_use` content blocks via `LongCatClient::chat_with_tools()`.
+
+```rust
+// acos-llm now supports:
+let response = llm.chat_with_tools(system, &conversation, Some(&tools)).await?;
+// response.tool_calls -> Vec<LlmToolCall> with .id, .name, .input
+```
+
+### 2. Cross-Platform Python Detection (was Windows-only)
+
+**Problem**: v0.1 used `where` command (Windows-only), breaking Linux/macOS.
+
+**Fix**: Platform-conditional compilation:
+
+```rust
+#[cfg(windows)]
+fn find_python() -> Option<&'static str> { /* uses "where" */ }
+
+#[cfg(not(windows))]
+fn find_python() -> Option<&'static str> { /* uses "which" */ }
+```
+
+### 3. Domain-Agnostic System Prompt (was task-specific)
+
+**Problem**: v0.1 prompt said "You are a data analysis assistant" — giving Baseline advance knowledge of task type.
+
+**Fix**: Now only defines capabilities, not solution approach:
+
+```
+You are a general-purpose task agent.
+
+You may use the following tools when needed.
+Use tools only when necessary to complete the task accurately.
+Return the final result when the task is complete.
+```
+
+### 4. Metrics: Self-Reported vs Verified Success (was conflated)
+
+**Problem**: v0.1 had `reported_success = true` whenever LLM stopped calling tools — conflating "LLM said done" with "task actually succeeded".
+
+**Fix**: Three distinct metrics:
+
+| Metric | Meaning |
+|--------|---------|
+| `self_reported_success` | LLM stopped calling tools |
+| `verified_success` | Verifier passed (set externally) |
+| `task_success` | Alias for verified_success |
+
+### 5. Honest Token/Cost Display (was misleading $0.0000)
+
+**Problem**: v0.1 showed `Estimated cost: $0.0000` even when cost was unknown.
+
+**Fix**: Now shows `N/A` when unknown:
+
+```rust
+self.estimated_cost_usd.map(|c| format!("${:.4}", c)).unwrap_or("N/A".into())
+```
+
+### 6. Evidence Adapter Concept (documented)
+
+Baseline produces its own native trace, then adapts to common verification model:
+
+```
+Baseline native trace
+        ↓
+Evidence Adapter
+        ↓
+Common Verification Model (acos-verify)
+```
+
+This is NOT "Baseline pretending to be ACOS Runtime" — it's a clean adapter pattern.
 
 ## Implementation
 
-### Files Created
+### Files
 
 | File | Action |
 |------|--------|
-| `crates/acos-baseline/Cargo.toml` | New crate definition |
-| `crates/acos-baseline/src/lib.rs` | Module declarations |
-| `crates/acos-baseline/src/agent.rs` | `ToolLoopAgent` with conversation loop |
-| `crates/acos-baseline/src/tools.rs` | 3 tools (read_file, write_file, execute_python) |
-| `crates/acos-baseline/src/metrics.rs` | `RunMetrics` struct for fair comparison |
-| `crates/acos-baseline/src/evidence.rs` | `EvidenceLog` mirroring ACOS event model |
-| `crates/acos-cli/src/main.rs` | Added `baseline` subcommand |
-| `crates/acos-cli/Cargo.toml` | Added `acos-baseline` + `acos-llm` deps |
-
-### Files Modified
-
-| File | Action |
-|------|--------|
-| `crates/acos-verify/src/lib.rs` | Removed `artifact.stored` requirement from `check_evidence` |
+| `crates/acos-llm/src/lib.rs` | Extended with `chat_with_tools`, `ToolDefinition`, `LlmToolCall`, `ChatResponse` |
+| `crates/acos-baseline/src/agent.rs` | Rewritten to use native tool calling |
+| `crates/acos-baseline/src/tools.rs` | Cross-platform Python detection |
+| `crates/acos-baseline/src/metrics.rs` | Added `input_tokens`, `output_tokens`, `self_reported_success`, `verified_success`, `task_success` |
+| `crates/acos-baseline/src/evidence.rs` | Unchanged (already had adapter pattern) |
+| `crates/acos-cli/src/main.rs` | Unchanged (uses `metrics.summary()`) |
 
 ### Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  ToolLoopAgent                                          │
-│                                                         │
-│  ┌─────────────┐     ┌─────────────┐                   │
-│  │ System Prompt│────→│             │                   │
-│  │ + Tools JSON │     │  LLM Call   │                   │
-│  └─────────────┘     │  (LongCat)  │                   │
-│                       │             │                   │
-│  ┌─────────────┐     │             │                   │
-│  │ Conversation│────→│             │                   │
-│  │ History     │     └──────┬──────┘                   │
-│  └─────────────┘            │                           │
-│                             ▼                           │
-│                    ┌────────────────┐                   │
-│                    │ Parse Tool Call│                   │
-│                    │ <tool_call>..  │                   │
-│                    └───────┬────────┘                   │
-│                            │                           │
-│              ┌─────────────┼─────────────┐             │
-│              ▼                           ▼             │
-│     ┌──────────────┐          ┌──────────────┐        │
-│     │ Execute Tool │          │ Final Report │        │
-│     │ (read/write/ │          │ (no tool     │        │
-│     │  python)     │          │  call found) │        │
-│     └──────┬───────┘          └──────────────┘        │
-│            │                                           │
-│            ▼                                           │
-│     ┌──────────────┐                                   │
-│     │ Feed Result  │──→ back to Conversation           │
-│     │ to LLM       │                                   │
-│     └──────────────┘                                   │
+|  ToolLoopAgent                                          |
+|                                                         |
+|  ┌─────────────┐     ┌──────────────────┐              |
+|  | System Prompt│────→|                  |              |
+|  | (domain-     |     |  LLM Call        |              |
+|  |  agnostic)   |     |  (native tools)  |              |
+|  └─────────────┘     |                  |              |
+|                       |  LongCatClient   |              |
+|  ┌─────────────┐     |  .chat_with_     |              |
+|  | Conversation│────→|  tools()         |              |
+|  | History     |     └────────┬─────────┘              |
+|  └─────────────┘              │                         |
+|                               ▼                         |
+|                    ┌────────────────────┐               |
+|                    | Response:          |               |
+|                    | - text             |               |
+|                    | - tool_calls[]     |               |
+|                    └────────┬───────────┘               |
+|                             │                           |
+|              ┌──────────────┼──────────────┐            |
+|              ▼                             ▼            |
+|     ┌──────────────┐          ┌──────────────┐         |
+|     | Execute Tool |          | Final Report |         |
+|     | (read/write/ |          | (no tool     |         |
+|     |  python)     |          |  calls)      |         |
+|     └──────┬───────┘          └──────────────┘         |
+|            │                                            |
+|            ▼                                            |
+|     ┌──────────────┐                                    |
+|     | Tool Result  │──→ back to Conversation           |
+|     | (native      │                                    |
+|     |  format)     │                                    |
+|     └──────────────┘                                    |
 └─────────────────────────────────────────────────────────┘
-```
-
-### Tool Definitions (frozen)
-
-```json
-[
-  {
-    "name": "read_file",
-    "description": "Read a file from disk and return its contents.",
-    "parameters": { "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"] }
-  },
-  {
-    "name": "write_file",
-    "description": "Write content to a file on disk.",
-    "parameters": { "type": "object", "properties": { "path": { "type": "string" }, "content": { "type": "string" } }, "required": ["path", "content"] }
-  },
-  {
-    "name": "execute_python",
-    "description": "Execute Python code and return stdout.",
-    "parameters": { "type": "object", "properties": { "code": { "type": "string" } }, "required": ["code"] }
-  }
-]
-```
-
-### Metrics Recorded
-
-| Metric | Description |
-|--------|-------------|
-| `agent_type` | "direct-tool-loop" |
-| `duration_ms` | Wall-clock time |
-| `llm_calls` | Number of LLM API calls |
-| `tool_calls` | Number of tool invocations |
-| `tool_failures` | Tool calls that errored |
-| `distinct_tools_used` | Unique tool types used |
-| `artifact_count` | Output artifacts produced |
-| `reported_success` | Whether agent completed |
-| `verification_passed` | Verifier verdict |
-| `estimated_cost_usd` | Token-based cost estimate |
-| `output_chars` | Total output size |
-
-## Verification Fix: `artifact.stored` Removal
-
-### Problem
-
-The `check_evidence` function required an `artifact.stored` event, but:
-- ACOS Runtime does NOT emit `artifact.stored` events (known from SUCCESS-002)
-- Bench fixtures (condition/loop/retry) don't produce artifacts
-- This caused `condition_suite_passes` to FAIL
-
-### Solution
-
-Removed the `artifact.stored` check from `check_evidence`. Rationale:
-- Artifact existence is a **Structural** concern (checked by `check_structural`)
-- Evidence layer should verify **execution** (run started/finished, primitives ran)
-- Not all runs produce artifacts (e.g., condition fixtures only search+summarize)
-
-### Before/After
-
-```diff
-- // Check 3: at least one artifact produced
-- let has_artifact = events.iter().any(|e| e.event_type == "artifact.stored");
-- findings.push(VerificationFinding {
--     passed: has_artifact,
--     ...
-- });
-
-+ // Check 3: primitives executed (artifact.stored removed — Runtime does not emit it;
-+ // artifact existence is a Structural concern, not Evidence)
 ```
 
 ## Test Results
 
-### Unit Tests (acos-baseline)
+### Unit Tests
 
 ```
-running 7 tests
-test agent::tests::parse_tool_call_invalid_json ... ok
-test agent::tests::parse_tool_call_no_call ... ok
-test agent::tests::parse_tool_call_valid ... ok
-test tools::tests::baseline_tools_has_three ... ok
-test tools::tests::read_file_missing_path ... ok
-test tools::tests::write_file_roundtrip ... ok
-test tools::tests::execute_python_hello ... ok
-
-test result: ok. 7 passed; 0 failed
-```
-
-### Bench Regression (all suites)
-
-```
-test condition_suite_passes ... ok
-test loop_suite_passes ... ok
-test negative_suite_rejects ... ok
-test rule_replan_recovers ... ok
-test recovery_suite_passes_with_model_skip ... ok
-test retry_suite_passes ... ok
-
-test result: ok. 6 passed; 0 failed
-```
-
-### Full Workspace
-
-```
-acos-baseline: 7 passed
-acos-bench: 6 passed
+acos-llm:     3 passed (chat_message, tool_result, tool_calls)
+acos-baseline: 5 passed (config, tools, read_file, write_file, python)
+acos-verify:   7 passed
+acos-bench:    6 passed (condition, loop, negative, recovery x2, retry)
 acos-compiler: 12 passed
-acos-core: 15 passed
-acos-llm: 1 passed
-acos-plugin: 2 passed
-acos-runtime: 12 passed
-acos-verify: 7 passed
-e2e_mini: 3 passed
+acos-core:     15 passed
+acos-runtime:  12 passed
+acos-plugin:   2 passed
+e2e_mini:      3 passed
 
 Total: 65 tests, 0 failures
-```
-
-## CLI Usage
-
-```bash
-# Run baseline agent on a goal
-cargo run -p acos-cli -- baseline "Analyze sales_q1.csv and report total revenue"
-
-# With verification against ground truth
-cargo run -p acos-cli -- baseline "Analyze all sales CSV files" \
-  --verify tests/benchmarks/p1/flagship_csv_quality/expected/ground_truth.yaml \
-  --output report.md
 ```
 
 ## Acceptance Criteria
 
 | Criterion | Status |
 |-----------|--------|
-| Agent compiles and runs | ✓ PASS |
-| Tool call parsing works | ✓ PASS |
-| Conversation loop terminates | ✓ PASS |
-| Metrics recorded | ✓ PASS |
-| Evidence collected | ✓ PASS |
-| Same verifier as ACOS | ✓ PASS |
+| Native tool calling (not custom XML) | ✓ PASS |
+| Cross-platform Python detection | ✓ PASS |
+| Domain-agnostic system prompt | ✓ PASS |
+| Self-reported vs verified success separated | ✓ PASS |
+| Honest cost display (N/A when unknown) | ✓ PASS |
+| Evidence adapter documented | ✓ PASS |
 | All workspace tests pass | ✓ PASS |
 | Bench regression unaffected | ✓ PASS |
 
-## Design Decisions
+## Frozen Configuration
 
-1. **No retry/replanning**: Baseline is intentionally simple. ACOS's value-add is recovery; baseline has none.
+The following are **frozen** for P1 experiments:
 
-2. **Flat conversation**: Each turn appends `[USER]`/`[ASSISTANT]` blocks rather than true multi-turn API. Simpler, sufficient for v0.1.
+```rust
+AgentConfig {
+    max_turns: 20,
+    max_tokens: 4096,
+}
 
-3. **Tool call format**: `<tool_call>JSON</tool_call>` is explicit and easy to parse. Alternative formats (XML, function-calling) can be explored later.
-
-4. **Evidence mirroring**: Baseline produces evidence items with same `event_type` strings as ACOS (`run.started`, `llm.call`, `tool.call`, `artifact.stored`) so the same verifier can process both.
+Tools: ["read_file", "write_file", "execute_python"]
+Tool format: Native Anthropic tool_use
+Model: LongCat-2.0 (configurable via ACOS_LLM_MODEL)
+```
 
 ## Next Steps
 
-1. Run end-to-end with actual LLM (requires `LONGCAT_API_KEY`) — record metrics
-2. Move to P1-4 (Fixed Workflow Baseline) — adds explicit steps but no compiler
-3. Move to P1-5 (ModelCompiler Comparative Evaluation) — ACOS vs baselines head-to-head
+1. **Run first real experiment**: ACOS × 5 vs Baseline × 5 on flagship task
+2. **Record**: verified_success, duration, LLM calls, tool calls, tokens, cost, verification score
+3. **Analyze**: mean, median, stddev, min, max, success rate
+4. **Then decide**: P1-4 Fixed Workflow worth doing, or fix Compiler first
 
 ---
 
-**Conclusion**: P1-3 Direct Tool-Loop Baseline v0.1 is functional. The agent can parse tool calls, execute tools, loop until completion, and produce verifiable output. Ready for end-to-end experiments and P1-4.
+**Conclusion**: P1-3 Direct Tool-Loop Baseline v0.2 is frozen and ready for experiments. The baseline is now a clean control group — no ACOS advantages, no artificial disadvantages.
