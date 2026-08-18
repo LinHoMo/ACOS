@@ -1013,6 +1013,63 @@ impl RuntimeImpl {
     }
 }
 
+/// Resolves a dotted `${a.b.c}` reference into its nested `TypedValue` from
+/// the environment: the first segment names an env binding, the remaining
+/// segments walk the payload's JSON object fields. Static paths only — no
+/// `[index]` support. Returns `None` when any segment is missing or the
+/// intermediate value is not an object.
+async fn resolve_dotted(
+    ref_str: &str,
+    env: &Arc<Mutex<HashMap<String, TypedValue>>>,
+) -> Option<TypedValue> {
+    let name = ref_str.strip_prefix("${").and_then(|s| s.strip_suffix('}'))?;
+    let mut parts = name.split('.');
+    let head = parts.next()?;
+    let guard = env.lock().await;
+    let mut cur = guard.get(head)?.clone();
+    drop(guard);
+    for seg in parts {
+        match &cur.payload {
+            serde_json::Value::Object(map) => {
+                let v = map.get(seg)?;
+                cur = TypedValue {
+                    value_type: if v.is_array() { ValueType::List } else if v.is_object() { ValueType::Record } else { ValueType::Scalar },
+                    payload: v.clone(),
+                };
+            }
+            _ => return None,
+        }
+    }
+    Some(cur)
+}
+
+/// Resolves a single `$name` / `${name}` token: exact env lookup first, then
+/// dotted path walk. Returns the token unchanged when unresolvable.
+async fn resolve_ref_token(token: &str, env: &Arc<Mutex<HashMap<String, TypedValue>>>) -> String {
+    let tv = {
+        let guard = env.lock().await;
+        let name = token
+            .strip_prefix("${")
+            .and_then(|s| s.strip_suffix('}'))
+            .or_else(|| token.strip_prefix('$'));
+        match name {
+            Some(name) => guard.get(name).cloned(),
+            None => return token.to_string(),
+        }
+    };
+    let tv = match tv {
+        Some(tv) => Some(tv),
+        None => resolve_dotted(token, env).await,
+    };
+    match tv {
+        Some(tv) => match &tv.payload {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        },
+        None => token.to_string(),
+    }
+}
+
 /// Resolves a `$name` or `${name}` reference to its string form.
 ///
 /// If the entire string is a single reference, returns the resolved value.
@@ -1021,28 +1078,10 @@ impl RuntimeImpl {
 /// larger strings like Python source code).
 async fn resolve_ref(ref_str: &str, env: &Arc<Mutex<HashMap<String, TypedValue>>>) -> String {
     // Fast path: the whole string is exactly one reference.
-    if ref_str.starts_with("${") && ref_str.ends_with("}") {
-        let name = &ref_str[2..ref_str.len() - 1];
-        let guard = env.lock().await;
-        return if let Some(tv) = guard.get(name) {
-            match &tv.payload {
-                Value::String(s) => s.clone(),
-                other => other.to_string(),
-            }
-        } else {
-            ref_str.to_string()
-        };
-    } else if ref_str.starts_with('$') && !ref_str[1..].contains(' ') {
-        let name = &ref_str[1..];
-        let guard = env.lock().await;
-        return if let Some(tv) = guard.get(name) {
-            match &tv.payload {
-                Value::String(s) => s.clone(),
-                other => other.to_string(),
-            }
-        } else {
-            ref_str.to_string()
-        };
+    if (ref_str.starts_with("${") && ref_str.ends_with('}'))
+        || (ref_str.starts_with('$') && !ref_str[1..].contains(' '))
+    {
+        return resolve_ref_token(ref_str, env).await;
     }
 
     // Slow path: template interpolation — replace all `${name}` occurrences.
@@ -1051,17 +1090,8 @@ async fn resolve_ref(ref_str: &str, env: &Arc<Mutex<HashMap<String, TypedValue>>
     while let Some(start) = rest.find("${") {
         result.push_str(&rest[..start]);
         if let Some(end) = rest[start..].find('}') {
-            let name = &rest[start + 2..start + end];
-            let guard = env.lock().await;
-            let replacement = if let Some(tv) = guard.get(name) {
-                match &tv.payload {
-                    Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                }
-            } else {
-                format!("${{{name}}}")
-            };
-            result.push_str(&replacement);
+            let token = &rest[start..start + end + 1];
+            result.push_str(&resolve_ref_token(token, env).await);
             rest = &rest[start + end + 1..];
         } else {
             result.push_str(&rest[start..]);
@@ -1817,5 +1847,29 @@ mod tests {
         let runtime = RuntimeImpl::with_registry(store.clone(), astore, FlakyRegistry::new());
         let err = runtime.validate_proposal(&program, &bad).await.unwrap_err();
         assert!(err.to_string().contains("reuse replace_node"));
+    }
+
+    #[tokio::test]
+    async fn dotted_path_resolves_nested_field() {
+        let env: Arc<Mutex<HashMap<String, TypedValue>>> = Arc::new(Mutex::new(HashMap::new()));
+        env.lock().await.insert("vr".into(), TypedValue {
+            value_type: ValueType::Record,
+            payload: serde_json::json!({"total_issues": 3, "issues": ["a", "b"]}),
+        });
+        let out = resolve_ref("${vr.total_issues}", &env).await;
+        assert_eq!(out, "3");
+        let out2 = resolve_ref("prefix ${vr.total_issues} suffix", &env).await;
+        assert_eq!(out2, "prefix 3 suffix");
+    }
+
+    #[tokio::test]
+    async fn dotted_path_missing_field_keeps_ref_unchanged() {
+        let env: Arc<Mutex<HashMap<String, TypedValue>>> = Arc::new(Mutex::new(HashMap::new()));
+        env.lock().await.insert("vr".into(), TypedValue {
+            value_type: ValueType::Record,
+            payload: serde_json::json!({"total_issues": 3}),
+        });
+        let out = resolve_ref("${vr.nonexistent}", &env).await;
+        assert_eq!(out, "${vr.nonexistent}");
     }
 }
