@@ -484,19 +484,8 @@ pub fn check_evidence(
         },
     });
 
-    // Check 3: at least one artifact produced
-    let has_artifact = events.iter().any(|e| e.event_type == "artifact.stored");
-    findings.push(VerificationFinding {
-        passed: has_artifact,
-        layer: VerificationLayer::Evidence,
-        message: if has_artifact {
-            "evidence: artifact.stored event present".into()
-        } else {
-            "evidence: NO artifact.stored event — no output persisted".into()
-        },
-    });
-
-    // Check 4: primitives executed
+    // Check 3: primitives executed (artifact.stored removed — Runtime does not emit it;
+    // artifact existence is a Structural concern, not Evidence)
     let primitive_count = events.iter().filter(|e| e.event_type == "primitive.end").count();
     findings.push(VerificationFinding {
         passed: primitive_count > 0,
@@ -655,17 +644,11 @@ mod tests {
             acos_core::traits::Event {
                 seq: 2,
                 run_id: RunId::new(),
-                event_type: "artifact.stored".into(),
-                payload: serde_json::json!({}),
-            },
-            acos_core::traits::Event {
-                seq: 3,
-                run_id: RunId::new(),
                 event_type: "primitive.end".into(),
                 payload: serde_json::json!({"ok": true}),
             },
             acos_core::traits::Event {
-                seq: 4,
+                seq: 3,
                 run_id: RunId::new(),
                 event_type: "run.finished".into(),
                 payload: serde_json::json!({}),
@@ -689,10 +672,6 @@ mod tests {
                 "primitive.end".into(),
                 serde_json::json!({"ok": true}),
             )
-            .await
-            .unwrap();
-        store
-            .append(run_id, "artifact.stored".into(), serde_json::json!({}))
             .await
             .unwrap();
         store

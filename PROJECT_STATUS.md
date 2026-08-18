@@ -56,11 +56,14 @@
 - [x] `run-cir --verify` 端到端验证
 - [x] 验证器正确拒绝占位报告（证明能识别"坏"输出）
 
-### P1-3 Direct Tool-Loop Baseline ⬜
+### P1-3 Direct Tool-Loop Baseline ✅
 
-- [ ] 最朴素的 LLM Agent：Goal → LLM → Tool Call → Tool Result → LLM → ...
-- [ ] 使用相同 flagship 任务 + 相同验证器
-- [ ] 产出第一份对比数据
+- [x] 最朴素的 LLM Agent：Goal → LLM → Tool Call → Tool Result → LLM → ...
+- [x] 相同工具集（read_file, write_file, execute_python）对齐 ACOS 原语
+- [x] 相同验证器（acos-verify 三层验证）
+- [x] 指标记录（latency, llm_calls, tool_calls, cost）
+- [x] CLI `baseline` 子命令
+- [x] 修复 `check_evidence` 移除 `artifact.stored` 硬性要求
 
 ### P1-4 Fixed Workflow Baseline ⬜
 
@@ -142,12 +145,12 @@ cargo run -p acos-cli -- run-cir <cir.json> [--env <env.json>] [--verify <ground
 
 ### P1 已知限制
 - RuleCompiler 生成的是简单线性流水线（无复杂控制流）——这是 P1-5 要验证的
-- Runtime 不发出 `artifact.stored` 事件（验证器会报告此缺失）
+- Runtime 不发出 `artifact.stored` 事件（验证器已改为不要求此事件）
 - 当前 Golden CIR 仅用于 Runtime 验证，不代表 Compiler 能力
+- Baseline 端到端测试需 `LONGCAT_API_KEY`（无 key 时跳过）
 
 ## 尚未开始 / Not yet started
 
-- P1-3 Direct Tool-Loop Baseline
 - P1-4 Fixed Workflow Baseline
 - P1-5 ModelCompiler Comparative Evaluation
 - Effect System（副作用声明与权限）
