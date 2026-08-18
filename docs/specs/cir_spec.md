@@ -151,6 +151,12 @@ CIR 使用 `serde(rename_all = "camelCase")`，注意转换规则只作用于下
 
 `${a.b.c}` 是静态字段路径，按 producer 的 `fields` 表逐层校验。**Phase 1 边界：路径不下降**——字段表是平面的，`${a.b.c}` 第二层以 `a` 的顶层字段表校验。含 `[`/`]` 的动态索引被拒绝。
 
+### R3/R4 与运行时一致性（Phase 1 简化，记录）
+
+- R3 对点路径引用 `${a.b}` 按 producer 的**顶层** `typeName` 比对（不深入字段级类型）。
+- loop `input` 引用在运行时（`resolve_ref_value`）Phase 1 不支持点路径解析——契约接受 `${x.y}` 作 loop input 时，运行时解析为 None 且**静默零次迭代**。实务上 loop input 应为列表绑定名（如 `${file_list}`）；正式评估以不写点路径的 loop input 为准。
+- 容器节点（sequence / parallel / conditional）声明 `output` 被**拒绝**（运行时只为 primitive 与 loop 绑定输出，契约与运行时保持一致）。
+
 ### item_var 作用域
 
 - `item_var` 在 loop body 内可见；loop 外引用 → unresolved。

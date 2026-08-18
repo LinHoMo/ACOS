@@ -71,12 +71,14 @@ pub fn validate_data_contract(program: &CirProgram) -> Result<(), CompilerError>
         // rejects_unresolved_binding requires non-entry refs to be checked).
         check_node(node, scope)?;
         let mut produced: HashMap<String, OutputSpec> = HashMap::new();
-        // the node's own output is visible to its enclosing scope (R2)
-        if let Some(o) = &node.output {
-            produced.insert(o.name.clone(), o.clone());
-        }
         match node.kind {
             CirNodeKind::Sequence => {
+                if node.output.is_some() {
+                    return Err(CompilerError::DataContractViolation {
+                        node_id: node.node_id.clone(),
+                        message: "container node 'sequence' cannot declare output (runtime binds only primitive and loop outputs)".into(),
+                    });
+                }
                 for child_id in &node.children {
                     let child = by_id.get(child_id.as_str()).ok_or_else(|| CompilerError::InvalidReference { node_id: node.node_id.clone(), referenced: child_id.clone() })?;
                     // children see current scope + earlier siblings' outputs
@@ -93,6 +95,12 @@ pub fn validate_data_contract(program: &CirProgram) -> Result<(), CompilerError>
                 }
             }
             CirNodeKind::Parallel => {
+                if node.output.is_some() {
+                    return Err(CompilerError::DataContractViolation {
+                        node_id: node.node_id.clone(),
+                        message: "container node 'parallel' cannot declare output (runtime binds only primitive and loop outputs)".into(),
+                    });
+                }
                 for child_id in &node.children {
                     let child = by_id.get(child_id.as_str()).ok_or_else(|| CompilerError::InvalidReference { node_id: node.node_id.clone(), referenced: child_id.clone() })?;
                     // parallel branches share nothing; each gets the incoming scope only,
@@ -103,6 +111,12 @@ pub fn validate_data_contract(program: &CirProgram) -> Result<(), CompilerError>
                 }
             }
             CirNodeKind::Conditional => {
+                if node.output.is_some() {
+                    return Err(CompilerError::DataContractViolation {
+                        node_id: node.node_id.clone(),
+                        message: "container node 'conditional' cannot declare output (runtime binds only primitive and loop outputs)".into(),
+                    });
+                }
                 for child_id in node.children.iter().chain(node.else_children.iter()) {
                     let child = by_id.get(child_id.as_str()).ok_or_else(|| CompilerError::InvalidReference { node_id: node.node_id.clone(), referenced: child_id.clone() })?;
                     let mut branch_scope = scope.clone();
@@ -152,6 +166,14 @@ pub fn validate_data_contract(program: &CirProgram) -> Result<(), CompilerError>
             }
             _ => {}
         }
+        // R2: a node's own output is visible to its enclosing scope — but only
+        // kinds whose outputs the runtime actually binds (primitive invocations
+        // and loop aggregates; containers are rejected above).
+        if node.kind == CirNodeKind::PrimitiveInvocation {
+            if let Some(o) = &node.output {
+                produced.insert(o.name.clone(), o.clone());
+            }
+        }
         Ok(produced)
     }
 
@@ -161,7 +183,10 @@ pub fn validate_data_contract(program: &CirProgram) -> Result<(), CompilerError>
             for raw in extract_refs(val) {
                 let spec = check_ref(node, &raw, scope)?;
                 if let Some(expected) = node.input_types.get(key) {
-                    if expected != &spec.type_name && !(expected == "number" && spec.type_name == "integer") && !(expected == "integer" && spec.type_name == "number") {
+                    let same = expected.eq_ignore_ascii_case(&spec.type_name);
+                    let num_int = (expected.eq_ignore_ascii_case("number") && spec.type_name.eq_ignore_ascii_case("integer"))
+                        || (expected.eq_ignore_ascii_case("integer") && spec.type_name.eq_ignore_ascii_case("number"));
+                    if !same && !num_int {
                         return Err(CompilerError::DataContractViolation {
                             node_id: node.node_id.clone(),
                             message: format!("input '{key}' expects '{expected}' but producer '{}' declares '{}'", spec.name, spec.type_name),
@@ -226,8 +251,6 @@ pub fn validate_data_contract(program: &CirProgram) -> Result<(), CompilerError>
         let produced = walk(e, &by_id, &mut top_scope, &producers)?;
         top_scope.extend(produced);
     }
-    // Final sweep: every node checked with the program-wide producer map for
-    // R1 (binding must exist somewhere) — scoping is enforced by walk.
     Ok(())
 }
 
@@ -373,6 +396,27 @@ mod tests {
         let mut root = seq_root(vec!["a"]);
         let err = validate_data_contract(&program(vec!["root"], vec![root, a])).unwrap_err();
         assert!(matches!(err, CompilerError::DataContractViolation { .. }));
+    }
+
+    #[test]
+    fn container_node_output_rejected() {
+        let mut child = node("a", Some(("x", "String", vec![])));
+        let root = CirNode { kind: CirNodeKind::Sequence, node_id: "root".into(), capability: None,
+            output: Some(OutputSpec { name: "container_out".into(), type_name: "String".into(), fields: vec![] }),
+            children: vec!["a".into()], else_children: vec![], inputs: HashMap::new(),
+            input_types: HashMap::new(), control: None };
+        let err = validate_data_contract(&program(vec!["root"], vec![root, child])).unwrap_err();
+        assert!(matches!(err, CompilerError::DataContractViolation { ref message, .. } if message.contains("cannot declare output")));
+    }
+
+    #[test]
+    fn type_match_is_case_insensitive() {
+        let a = node("a", Some(("stats", "Number", vec![])));
+        let mut b = node("b", None);
+        b.inputs.insert("stats".into(), serde_json::Value::String("${stats}".into()));
+        b.input_types.insert("stats".into(), "number".into());
+        let root = seq_root(vec!["a", "b"]);
+        assert!(validate_data_contract(&program(vec!["root"], vec![root, a, b])).is_ok());
     }
 
     #[test]
