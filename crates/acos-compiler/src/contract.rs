@@ -95,9 +95,11 @@ pub fn validate_data_contract(program: &CirProgram) -> Result<(), CompilerError>
             CirNodeKind::Parallel => {
                 for child_id in &node.children {
                     let child = by_id.get(child_id.as_str()).ok_or_else(|| CompilerError::InvalidReference { node_id: node.node_id.clone(), referenced: child_id.clone() })?;
-                    // parallel branches share nothing; each gets the incoming scope only
+                    // parallel branches share nothing; each gets the incoming scope only,
+                    // but once the block completes, branch outputs are visible to siblings (R2)
                     let mut child_scope = scope.clone();
-                    walk(child, by_id, &mut child_scope, producers)?;
+                    let child_produced = walk(child, by_id, &mut child_scope, producers)?;
+                    for (k, v) in child_produced { produced.insert(k, v); }
                 }
             }
             CirNodeKind::Conditional => {
@@ -159,11 +161,23 @@ pub fn validate_data_contract(program: &CirProgram) -> Result<(), CompilerError>
             for raw in extract_refs(val) {
                 let mut parts = raw.split('.');
                 let name = parts.next().unwrap_or("");
+                if name.contains('[') || name.contains(']') {
+                    return Err(CompilerError::DataContractViolation {
+                        node_id: node.node_id.clone(),
+                        message: format!("binding '{name}' uses dynamic indexing, not supported in Phase 1"),
+                    });
+                }
                 let spec = scope.get(name);
                 let Some(spec) = spec else {
                     return Err(CompilerError::UnresolvedBinding { node_id: node.node_id.clone(), binding: name.to_string() });
                 };
                 for field in parts {
+                    if field.contains('[') || field.contains(']') {
+                        return Err(CompilerError::DataContractViolation {
+                            node_id: node.node_id.clone(),
+                            message: format!("field '{field}' of '{name}' uses dynamic indexing, not supported in Phase 1"),
+                        });
+                    }
                     let f = spec.fields.iter().find(|f| f.name == field).ok_or_else(|| CompilerError::DataContractViolation {
                         node_id: node.node_id.clone(),
                         message: format!("binding '{name}' has no field '{field}'"),
@@ -202,10 +216,11 @@ pub fn validate_data_contract(program: &CirProgram) -> Result<(), CompilerError>
 }
 
 #[cfg(test)]
+#[allow(unused_mut)]
 mod tests {
     use super::*;
     use acos_core::id::{ProgramId, TaskId};
-    use acos_core::types::{ConditionSpec, ControlSpec, FieldSpec};
+    use acos_core::types::{ConditionSpec, ControlSpec, FieldSpec, LoopKind, LoopSpec};
 
     type OutputArgs = Option<(&'static str, &'static str, Vec<(&'static str, &'static str)>)>;
 
@@ -235,6 +250,97 @@ mod tests {
         CirNode { kind: CirNodeKind::Sequence, node_id: "root".into(), capability: None, output: None,
             children: children.into_iter().map(String::from).collect(), else_children: vec![],
             inputs: HashMap::new(), input_types: HashMap::new(), control: None }
+    }
+
+    #[test]
+    fn parallel_outputs_visible_after_block() {
+        let mut a = node("a", Some(("doc_a", "Document", vec![])));
+        let mut c = node("c", None);
+        c.inputs.insert("text".into(), serde_json::Value::String("${doc_a}".into()));
+        let mut par = CirNode { kind: CirNodeKind::Parallel, node_id: "par".into(), capability: None,
+            output: None, children: vec!["a".into()], else_children: vec![], inputs: HashMap::new(),
+            input_types: HashMap::new(), control: None };
+        let mut root = seq_root(vec!["par", "c"]);
+        assert!(validate_data_contract(&program(vec!["root"], vec![root, par, a, c])).is_ok());
+    }
+
+    #[test]
+    fn dotted_field_path_must_exist_in_schema() {
+        let mut a = node("a", Some(("vr", "ValidationResult",
+            vec![("total_issues", "Integer"), ("issues", "List")])));
+        let mut b = node("b", None);
+        b.inputs.insert("code".into(), serde_json::Value::String("n = ${vr.total_issues}".into()));
+        let mut root = seq_root(vec!["a", "b"]);
+        assert!(validate_data_contract(&program(vec!["root"], vec![root.clone(), a.clone(), b.clone()])).is_ok());
+        b.inputs.insert("code".into(), serde_json::Value::String("n = ${vr.missing_field}".into()));
+        let err = validate_data_contract(&program(vec!["root"], vec![root, a, b])).unwrap_err();
+        assert!(matches!(err, CompilerError::DataContractViolation { .. }));
+    }
+
+    #[test]
+    fn dynamic_index_paths_rejected_in_phase1() {
+        let mut a = node("a", Some(("all", "List<String>", vec![])));
+        let mut b = node("b", None);
+        b.inputs.insert("code".into(), serde_json::Value::String("x = ${all[0]}".into()));
+        let mut root = seq_root(vec!["a", "b"]);
+        let err = validate_data_contract(&program(vec!["root"], vec![root, a, b])).unwrap_err();
+        assert!(matches!(err, CompilerError::DataContractViolation { .. }));
+    }
+
+    #[test]
+    fn item_var_visible_inside_loop_body_not_outside() {
+        let mut body = node("body", Some(("per", "String", vec![])));
+        body.inputs.insert("text".into(), serde_json::Value::String("${item}".into()));
+        let mut loop_node = CirNode { kind: CirNodeKind::LoopMap, node_id: "loop".into(), capability: None,
+            output: None, children: vec!["body".into()], else_children: vec![], inputs: HashMap::new(),
+            input_types: HashMap::new(), control: Some(ControlSpec { condition: None,
+                loop_spec: Some(LoopSpec { kind: LoopKind::ForEach, condition: None, max_iterations: None,
+                    input: Some("${items}".into()), item_var: Some("item".into()) }), retry: None }) };
+        let mut root = seq_root(vec!["loop"]);
+        assert!(validate_data_contract(&program(vec!["root"], vec![root.clone(), loop_node.clone(), body.clone()])).is_ok());
+        let mut after = node("after", None);
+        after.inputs.insert("code".into(), serde_json::Value::String("x = ${item}".into()));
+        let mut root2 = seq_root(vec!["loop", "after"]);
+        let err = validate_data_contract(&program(vec!["root"], vec![root2, loop_node, body, after])).unwrap_err();
+        assert!(matches!(err, CompilerError::UnresolvedBinding { .. }));
+    }
+
+    #[test]
+    fn item_var_shadowing_top_level_binding_rejected() {
+        let mut src = node("src", Some(("file_path", "String", vec![])));
+        let mut body = node("body", Some(("per", "String", vec![])));
+        let mut loop_node = CirNode { kind: CirNodeKind::LoopMap, node_id: "loop".into(), capability: None,
+            output: None, children: vec!["body".into()], else_children: vec![], inputs: HashMap::new(),
+            input_types: HashMap::new(), control: Some(ControlSpec { condition: None,
+                loop_spec: Some(LoopSpec { kind: LoopKind::ForEach, condition: None, max_iterations: None,
+                    input: Some("${files}".into()), item_var: Some("file_path".into()) }), retry: None }) };
+        let mut root = seq_root(vec!["src", "loop"]);
+        let err = validate_data_contract(&program(vec!["root"], vec![root, src, loop_node, body])).unwrap_err();
+        assert!(matches!(err, CompilerError::DataContractViolation { .. }));
+    }
+
+    #[test]
+    fn loop_aggregate_type_must_be_list_of_last_child_type() {
+        let mut body = node("body", Some(("vr", "ValidationResult", vec![])));
+        let mut loop_node = CirNode { kind: CirNodeKind::LoopMap, node_id: "loop".into(), capability: None,
+            output: Some(OutputSpec { name: "all_results".into(), type_name: "List<ValidationResult>".into(), fields: vec![] }),
+            children: vec!["body".into()], else_children: vec![], inputs: HashMap::new(),
+            input_types: HashMap::new(), control: Some(ControlSpec { condition: None,
+                loop_spec: Some(LoopSpec { kind: LoopKind::ForEach, condition: None, max_iterations: None,
+                    input: Some("${items}".into()), item_var: Some("item".into()) }), retry: None }) };
+        let mut root = seq_root(vec!["loop"]);
+        assert!(validate_data_contract(&program(vec!["root"], vec![root.clone(), loop_node.clone(), body.clone()])).is_ok());
+        loop_node.output.as_mut().unwrap().type_name = "ValidationResult".into();
+        let err = validate_data_contract(&program(vec!["root"], vec![root, loop_node, body])).unwrap_err();
+        assert!(matches!(err, CompilerError::DataContractViolation { .. }));
+    }
+
+    #[test]
+    fn incomplete_output_schema_rejected() {
+        let mut a = node("a", Some(("x", "", vec![])));
+        let mut root = seq_root(vec!["a"]);
+        let err = validate_data_contract(&program(vec!["root"], vec![root, a])).unwrap_err();
+        assert!(matches!(err, CompilerError::DataContractViolation { .. }));
     }
 
     #[test]
