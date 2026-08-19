@@ -1,7 +1,7 @@
 # P1-4 Fixed Workflow Baseline — 实验设计（spec）
 
-> **状态**: DRAFT（待用户批准冻结）。
-> **日期**: 2026-08-19 · **代码版本**: main @ `6b91984`（P1-5B v0.1 已冻结，历史数据不修改）。
+> **状态**: **APPROVED → FROZEN**（2026-08-19 用户批准）。
+> **日期**: 2026-08-19 · **代码版本**: main @ `7f663d6`（P1-5B v0.1 已冻结，历史数据不修改）。
 
 ---
 
@@ -34,6 +34,7 @@ P1-5B:  ModelCompiler    0/5 · RuleCompiler 5/5
 **列定义**（Fixed Workflow 专属）：
 - **Compile**：N/A（无编译产物）。
 - **Contract**：输出契约检查——artifact 满足任务 `outputs` 声明（report.md 存在、非空、含必需章节；即 verifier Structural 层）。记为 PASS/FAIL，非 N/A。
+  - ⚠️ **明确区分**：`Fixed Workflow Contract Check ≠ ACOS CIR Data Contract`（Stage Data Contract R1–R5 是编译期 CIR 契约；Fixed Workflow 无 CIR，其 Contract 仅是 **artifact-level contract compliance** 的可比代理。避免二者混淆）。
 - **Execute**：固定脚本执行完成且无未捕获异常。
 - **Adequacy**：同一 acos-verify 三层 oracle（Structural / Semantic / Evidence vs Ground Truth）。
 
@@ -113,7 +114,13 @@ generate report（data_quality / quarterly_summary / anomalies / recovery_log + 
 **禁止**：
 - hardcode Ground Truth 数值（任何 `grand_total_revenue = 2199150.00` 之类字面量）
 - 读取 `expected/ground_truth.yaml` 或 `schema.yaml`
-- 按文件名特判（`if file == sales_q2.csv: ...` 或针对具体扰动模式的分支）
+- 按文件名特判（`if file == sales_q2.csv: ...` 或针对具体扰动模式的分支，如 `if quarter=="Q2": fix_schema()`）
+- **调用 ACOS runtime / CIR executor / compiler 组件**（`acos-runtime` / `acos-compiler` / `ModelCompiler` / `RuleCompiler` / CIR 任何路径）——防止边界污染
+
+**允许**（engineering logic，非 benchmark 特判）：
+- 通用列映射推断：`if missing_column: infer_column_mapping()`（语义关键词对齐，非按文件名）
+- 通用数据修复：去重、货币格式清洗、缺失标记、容错解析（CSV 未引号化逗号修复）
+- pandas / csv 标准库 / 确定性规则
 
 **审查**：实现完成后逐行对照本清单审查；任何违规 → 修改直至合规方可运行实验。
 
@@ -121,11 +128,11 @@ generate report（data_quality / quarterly_summary / anomalies / recovery_log + 
 
 四层（§3）+ **Engineering Cost**（新增维度——Fixed Workflow 的代价是"人类写多少"）：
 
-| System         | LOC   | Nodes | Author Time |
-| -------------- | ----- | ----- | ----------- |
-| Fixed Workflow | ?     | N/A   | ?           |
-| RuleCompiler   | 规则量 | 程序节点 | N/A        |
-| ModelCompiler  | prompt | 程序节点 | N/A        |
+| System         | LOC   | Nodes | Author Time | External Knowledge Required |
+| -------------- | ----- | ----- | ----------- | ---------------------------- |
+| Fixed Workflow | ?     | N/A   | ?           | human understanding of CSV task（领域 + 工程） |
+| RuleCompiler   | 规则量 | 程序节点 | N/A        | compiler rule implementation |
+| ModelCompiler  | prompt | 程序节点 | N/A        | prompt + model capability |
 
 否则 Fixed Workflow 永远是强者：人类提前知道答案。
 
@@ -158,4 +165,10 @@ generate report（data_quality / quarterly_summary / anomalies / recovery_log + 
 | 脚本被写成 benchmark 特判（作弊） | §7 清单审查 + 拒绝运行 |
 | python 环境未就绪 | 复用 acos-baseline 的跨平台检测；实验前 PATH 校验 |
 | 口径与验证器不一致导致误判 | 先跑 smoke 验证 artifact 结构，再正式 ×5 |
-| Contract 层定义含糊 | §3 列定义固定：Contract = 输出契约检查（Structural 层） |
+| Contract 层定义含糊 | §3 列定义固定：Contract = 输出契约检查（Structural 层），且明确 ≠ Stage Data Contract |
+
+## 13. 冻结声明（用户批准，LOCKED）
+
+- Status: **APPROVED → FROZEN**（commit `7f663d6`）
+- 实验协议 LOCKED，**禁止修改**：workflow logic（runs 开始后）、verification oracle、ground truth、metrics definition
+- 实施顺序：spec 冻结 → `acos-fixed-workflow` crate → Fairness review → cargo test → clippy → ×5 runs → SUCCESS-005 → freeze
