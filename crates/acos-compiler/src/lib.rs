@@ -26,10 +26,12 @@ use acos_core::types::{
 };
 
 pub mod replan;
+pub mod plan;
 
 mod contract;
 
 pub use replan::ModelRecoveryPlanner;
+pub use plan::{PlanIR, compile_plan, validate_plan};
 
 use crate::contract::validate_data_contract;
 
@@ -287,6 +289,71 @@ Think step by step, then output ONLY the JSON.
 
 "#;
 
+/// System prompt for the P1-5B v0.2 Plan IR frontend (Structured Program
+/// Synthesis).
+///
+/// The model plans at the **intent level** only: goal, steps, data flow, and
+/// control flow. It never writes CIR structures (node ids, children, entry,
+/// bindings, effects, environment plumbing) — those are produced by the
+/// deterministic compiler. The prompt deliberately contains NO task-specific
+/// golden plan: the compiler contract below is schema pedagogy, and the only
+/// execution hint is how `inputs` (the task's declared files) may be used.
+const PLAN_SYSTEM_PROMPT: &str = r#"You are the ACOS Structured Planner. You produce an **execution plan** (intent level) for a task. A deterministic compiler will turn your plan into the executable CIR. You do NOT write CIR — no node ids, no children arrays, no entry points, no effect declarations, no file paths.
+
+# What a plan contains
+
+A plan is a JSON object with:
+- `goal`: restatement of the task goal in your own words.
+- `steps`: ordered list of steps. Execution order = array order.
+- `dataFlow` (optional): declare data dependencies as `{ "fromStep": <step name>, "toStep": <step name>, "binding": <output name> }`. Each declaration MUST be consistent with the step bindings.
+- `controlFlow` (optional): declare control intents as `{ "step": <step name>, "kind": "foreach"|"conditional"|"retry", "over": <step name or "inputs">, "condition": <expression> }`. Each declaration MUST be consistent with the step kind.
+
+# Steps
+
+Each step is a JSON object with a `kind` from the following table:
+
+| kind | fields | semantics |
+|---|---|---|
+| `primitive` | `name`, `capability`, `code`, `inputBindings`, `output` | one primitive invocation |
+| `foreach` | `name`, `over`, `body`, `output` | iterate over a list; `body` runs per element |
+| `conditional` | `name`, `condition`, `body` | run `body` only if condition holds |
+| `retry` | `name`, `capability`, `code`, `inputBindings`, `output`, `retry` | primitive invocation with retry policy |
+
+Common fields:
+- `name`: unique identifier (letters, digits, underscore; must not start with a digit).
+- `description`: one sentence about what the step does (optional).
+- `capability`: one of `search`, `read_file`, `write_file`, `execute_python`, `summarize`.
+- `code`: Python code for `execute_python` steps. It may reference values produced by earlier steps as `${outputName}` (and `${item}` inside a foreach body). The code runs inside the ACOS sandbox with a populated `env`; return values via `env["name"] = value` or plain variable assignment.
+- `inputBindings`: array of `{ "param": <name>, "source": <step name>, "binding": <output name> }` — bind a previous step's output to a parameter.
+- `output`: `{ "name": <unique identifier>, "typeName": <type>, "fields": [ { "name": ..., "typeName": "Number"|"Integer"|"String"|"Boolean"|"List"|"Record"|"Any" } ] }`. `typeName` must be non-empty; use `List<X>` for lists of `X`. `fields` documents record schemas (may be empty).
+- `retry` (retry steps only): `{ "maxAttempts": <>= 2> }`.
+
+# Binding rules (the compiler enforces these)
+
+1. A step may only reference outputs of steps that appear earlier (top-level order, or earlier within the same body).
+2. A foreach body step may additionally reference `${item}` — the current element. Do NOT declare `item` as an output anywhere.
+3. A foreach step's `output` (if any) MUST have typeName `List<X>` where `X` is the typeName of the LAST body step's output.
+4. Every `${...}` inside `code`, `condition`, and `inputBindings` must resolve to a declared output visible in that scope.
+5. Conditional steps cannot declare outputs (branch results do not escape).
+
+# The `inputs` special source
+
+The task's declared input files are available as a `List<String>` of paths. To process each file, write a `foreach` step with `"over": "inputs"` and a body step whose `code` receives the current file path via `${item}`. Do NOT write file paths anywhere in the plan — the compiler injects the declared paths.
+
+# Prohibitions (hard errors)
+
+- No CIR concepts: no `nodeId`, `children`, `entry`, `effects`, `inputs` map with `${...}` reference plumbing.
+- No file paths, URLs, or `/tmp/...` literals.
+- No task identifiers.
+- No plan-level `retry` steps without a `retry` policy.
+- The `item` name is reserved for loop iteration.
+
+# Output format
+
+Respond with ONLY the plan JSON, no markdown, no commentary, no code fences.
+
+"#;
+
 // ── ModelCompiler ────────────────────────────────────────────────────────────
 
 /// Model-assisted compiler: asks Claude to generate the CIR.
@@ -312,6 +379,9 @@ pub struct CompileTrace {
     pub repair_attempts: Vec<RepairTraceEntry>,
     /// The final error if compilation failed entirely.
     pub final_error: Option<String>,
+    /// The final valid Plan IR (P1-5B v0.2 path), if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan: Option<PlanIR>,
     /// Wall-clock timings (milliseconds).
     pub timing: CompileTiming,
 }
@@ -559,6 +629,7 @@ impl ModelCompiler {
             initial_error: None,
             repair_attempts: Vec::new(),
             final_error: None,
+            plan: None,
             timing: CompileTiming::default(),
         };
         let total_start = std::time::Instant::now();
@@ -730,6 +801,327 @@ impl ModelCompiler {
         let traced = self.compile_traced(task, max_repair_attempts).await;
         traced.result
     }
+
+    // ── P1-5B v0.2: Structured Program Synthesis frontend ──────────────────
+
+    /// Builds the Plan IR user prompt: task facts (goal, inputs, outputs,
+    /// constraints) plus the plan-mode instruction. Input paths are listed so
+    /// the model knows WHAT files exist, but the plan itself must reference
+    /// them via the `inputs` source only (the compiler injects the paths).
+    fn build_plan_user_prompt(&self, task: &TaskSpec) -> String {
+        let mut out = String::new();
+        out.push_str("Produce an execution plan for the following ACOS task.\n\n");
+        out.push_str("# Task Goal\n\n");
+        out.push_str(&task.goal);
+        out.push_str("\n\n");
+
+        if !task.inputs.is_empty() {
+            out.push_str("# Declared Inputs (for awareness only)\n\n");
+            out.push_str("The task declares these input files; your plan MUST NOT embed any path — use `\"over\": \"inputs\"` for per-file processing:\n\n");
+            for (i, input) in task.inputs.iter().enumerate() {
+                out.push_str(&format!(
+                    "{}. type=\"{}\", path=\"{}\"",
+                    i + 1,
+                    input.input_type,
+                    input.path
+                ));
+                if let Some(ref fmt) = input.format {
+                    out.push_str(&format!(", format=\"{fmt}\""));
+                }
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+
+        if !task.outputs.is_empty() {
+            out.push_str("# Required Outputs\n\n");
+            out.push_str("The plan MUST produce:\n\n");
+            for output in &task.outputs {
+                out.push_str(&format!("- type=\"{}\"", output.output_type));
+                if let Some(ref fmt) = output.format {
+                    out.push_str(&format!(", format=\"{fmt}\""));
+                }
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+
+        if let Some(ref c) = task.constraints {
+            out.push_str("# Constraints\n\n");
+            if let Some(t) = c.timeout_seconds {
+                out.push_str(&format!("- timeoutSeconds: {t}\n"));
+            }
+            if let Some(cost) = c.max_cost {
+                out.push_str(&format!("- maxCost: {cost}\n"));
+            }
+            out.push('\n');
+        }
+
+        out.push_str("# Instructions\n\n");
+        out.push_str("Think through the task's required operations (detection, repair, validation, aggregation, reporting) and express them as plan steps. Return ONLY the plan JSON.");
+        out
+    }
+
+    /// Builds a repair prompt for the Plan IR frontend.
+    fn build_plan_repair_prompt(
+        &self,
+        task: &TaskSpec,
+        raw_output: &str,
+        error: &str,
+    ) -> String {
+        let excerpt = if raw_output.len() > 500 {
+            &raw_output[..500]
+        } else {
+            raw_output
+        };
+        format!(
+            "Your previous output failed plan validation. Produce a corrected plan for the task below.\n\n\
+             {context}\n\n\
+             Previous error:\n{error}\n\n\
+             Original output excerpt:\n```\n{excerpt}\n```\n\n\
+             Analyze the error and return a corrected plan JSON.\n\
+             Respond with ONLY the corrected JSON, no commentary.",
+            context = self.build_plan_user_prompt(task),
+        )
+    }
+
+    /// Parses the model's response into a validated [`PlanIR`].
+    ///
+    /// Mirrors [`Self::parse_cir`]: JSON syntax → schema shape → semantic
+    /// validation, returning targeted [`CompilerError`] variants so the repair
+    /// loop can give precise feedback.
+    fn parse_plan(&self, raw: &str) -> Result<PlanIR, CompilerError> {
+        let json_str = extract_json_object(raw);
+
+        let value: Value = serde_json::from_str(&json_str).map_err(|e| {
+            CompilerError::JsonSyntaxError {
+                message: e.to_string(),
+                raw_excerpt: raw.chars().take(200).collect(),
+            }
+        })?;
+
+        let plan: PlanIR = serde_json::from_value(value).map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("missing field") {
+                let field = msg
+                    .split("missing field `")
+                    .nth(1)
+                    .and_then(|s| s.split('`').next())
+                    .unwrap_or("unknown")
+                    .to_string();
+                CompilerError::MissingRequiredField { field }
+            } else {
+                CompilerError::JsonShapeError { message: msg }
+            }
+        })?;
+
+        validate_plan(&plan).map_err(|message| CompilerError::JsonShapeError { message })?;
+
+        Ok(plan)
+    }
+
+    /// P1-5B v0.2 two-stage compile with bounded repair retry and full trace.
+    ///
+    /// Frontend: LLM produces a Plan IR → validated → deterministically
+    /// compiled to CIR (bindings, types, scopes, control nodes all
+    /// compiler-generated). The Stage Data Contract (R1–R5) is enforced on
+    /// the compiled CIR; a violation here is a compiler bug, not a model error
+    /// (the total-function contract in `plan::compile_plan`).
+    pub async fn compile_plan_traced(
+        &self,
+        task: &TaskSpec,
+        max_repair_attempts: u32,
+    ) -> TracedCompile {
+        let task_id = task.id;
+        let user_prompt = self.build_plan_user_prompt(task);
+        let mut trace = CompileTrace {
+            initial_prompt: user_prompt.clone(),
+            initial_response: String::new(),
+            initial_error: None,
+            repair_attempts: Vec::new(),
+            final_error: None,
+            plan: None,
+            timing: CompileTiming::default(),
+        };
+        let total_start = std::time::Instant::now();
+        let mut diagnostics: Vec<Diagnostic> = vec![];
+
+        let init_start = std::time::Instant::now();
+        let raw = match self.llm.complete(PLAN_SYSTEM_PROMPT, &user_prompt).await {
+            Ok(r) => r,
+            Err(e) => {
+                trace.timing.total_ms = total_start.elapsed().as_millis() as u64;
+                trace.final_error = Some(e.to_string());
+                return TracedCompile { result: Err(e), trace };
+            }
+        };
+        trace.timing.initial_llm_ms = init_start.elapsed().as_millis() as u64;
+        trace.initial_response = raw.clone();
+
+        let finish_ok = |trace: &mut CompileTrace, program: CirProgram, diagnostics: Vec<Diagnostic>, total_start: std::time::Instant| {
+            trace.timing.total_ms = total_start.elapsed().as_millis() as u64;
+            TracedCompile { result: Ok(CompileResult { program, diagnostics }), trace: trace.clone() }
+        };
+
+        match self.parse_plan(&raw) {
+            Ok(plan) => {
+                trace.plan = Some(plan.clone());
+                diagnostics.push(Diagnostic {
+                    level: DiagnosticLevel::Note,
+                    message: format!(
+                        "compile.plan.ok: model generated plan with {} steps via {}",
+                        plan.steps.len(),
+                        self.llm.model()
+                    ),
+                });
+                match crate::plan::compile_plan(&plan, task, task_id, ProgramId::new()) {
+                    Ok(program) => {
+                        diagnostics.push(Diagnostic {
+                            level: DiagnosticLevel::Note,
+                            message: format!(
+                                "compile.succeeded: plan compiled to program {} ({} nodes)",
+                                program.id.0,
+                                program.nodes.len(),
+                            ),
+                        });
+                        finish_ok(&mut trace, program, diagnostics, total_start)
+                    }
+                    Err(plan_err) => {
+                        // Total-function sentinel: valid plan must compile.
+                        let e = AcosError::CompilerFailure {
+                            message: format!("plan compiler internal error: {plan_err}"),
+                        };
+                        trace.final_error = Some(e.to_string());
+                        finish_trace_err(&mut trace, e, total_start)
+                    }
+                }
+            }
+            Err(first_error) => {
+                trace.initial_error = Some(first_error.to_string());
+                diagnostics.push(Diagnostic {
+                    level: DiagnosticLevel::Warning,
+                    message: format!("compile.plan.parse_failed: {first_error}"),
+                });
+
+                let mut last_error = first_error;
+                let mut raw = raw;
+
+                for attempt in 1..=max_repair_attempts {
+                    let repair_prompt =
+                        self.build_plan_repair_prompt(task, &raw, &last_error.to_string());
+
+                    diagnostics.push(Diagnostic {
+                        level: DiagnosticLevel::Note,
+                        message: format!(
+                            "compile.plan.repair.started: attempt {attempt}/{max_repair_attempts}"
+                        ),
+                    });
+
+                    let repair_start = std::time::Instant::now();
+                    match self.llm.complete(PLAN_SYSTEM_PROMPT, &repair_prompt).await {
+                        Ok(retry_raw) => {
+                            trace.timing.repair_llm_ms += repair_start.elapsed().as_millis() as u64;
+                            match self.parse_plan(&retry_raw) {
+                                Ok(plan) => {
+                                    trace.plan = Some(plan.clone());
+                                    trace.repair_attempts.push(RepairTraceEntry {
+                                        attempt,
+                                        prompt: repair_prompt,
+                                        response: retry_raw,
+                                        validation_error: None,
+                                    });
+                                    diagnostics.push(Diagnostic {
+                                        level: DiagnosticLevel::Note,
+                                        message: format!(
+                                            "compile.plan.repair.succeeded on attempt {attempt}"
+                                        ),
+                                    });
+                                    match crate::plan::compile_plan(
+                                        &plan,
+                                        task,
+                                        task_id,
+                                        ProgramId::new(),
+                                    ) {
+                                        Ok(program) => {
+                                            diagnostics.push(Diagnostic {
+                                                level: DiagnosticLevel::Note,
+                                                message: format!(
+                                                    "compile.succeeded: plan compiled to program {} ({} nodes)",
+                                                    program.id.0,
+                                                    program.nodes.len(),
+                                                ),
+                                            });
+                                            return finish_ok(&mut trace, program, diagnostics, total_start);
+                                        }
+                                        Err(plan_err) => {
+                                            let e = AcosError::CompilerFailure {
+                                                message: format!(
+                                                    "plan compiler internal error: {plan_err}"
+                                                ),
+                                            };
+                                            trace.final_error = Some(e.to_string());
+                                            return finish_trace_err(&mut trace, e, total_start);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    trace.repair_attempts.push(RepairTraceEntry {
+                                        attempt,
+                                        prompt: repair_prompt,
+                                        response: retry_raw.clone(),
+                                        validation_error: Some(e.to_string()),
+                                    });
+                                    diagnostics.push(Diagnostic {
+                                        level: DiagnosticLevel::Warning,
+                                        message: format!(
+                                            "compile.plan.repair.validation_failed (attempt {attempt}): {e}"
+                                        ),
+                                    });
+                                    last_error = e;
+                                    raw = retry_raw;
+                                }
+                            }
+                        }
+                        Err(llm_err) => {
+                            trace.timing.repair_llm_ms += repair_start.elapsed().as_millis() as u64;
+                            trace.repair_attempts.push(RepairTraceEntry {
+                                attempt,
+                                prompt: repair_prompt,
+                                response: String::new(),
+                                validation_error: Some(llm_err.to_string()),
+                            });
+                            diagnostics.push(Diagnostic {
+                                level: DiagnosticLevel::Error,
+                                message: format!(
+                                    "compile.plan.repair.llm_error (attempt {attempt}): {llm_err}"
+                                ),
+                            });
+                            trace.timing.total_ms = total_start.elapsed().as_millis() as u64;
+                            trace.final_error = Some(llm_err.to_string());
+                            return TracedCompile { result: Err(llm_err), trace };
+                        }
+                    }
+                }
+
+                let final_error = CompilerError::RepairExhausted {
+                    attempts: max_repair_attempts,
+                    last_error: Box::new(last_error),
+                };
+                diagnostics.push(Diagnostic {
+                    level: DiagnosticLevel::Error,
+                    message: format!("compile.failed: {final_error}"),
+                });
+                trace.final_error = Some(final_error.to_string());
+                finish_trace_err(&mut trace, AcosError::from(final_error), total_start)
+            }
+        }
+    }
+}
+
+/// Shared helper for the v0.2 frontend: builds a failed TracedCompile.
+fn finish_trace_err(trace: &mut CompileTrace, e: AcosError, total_start: std::time::Instant) -> TracedCompile {
+    trace.timing.total_ms = total_start.elapsed().as_millis() as u64;
+    TracedCompile { result: Err(e), trace: trace.clone() }
 }
 
 #[async_trait]

@@ -757,8 +757,20 @@ impl RuntimeImpl {
                 let items = self
                     .resolve_ref_value(&input, env)
                     .await
-                    .map(|tv| tv.payload.as_array().cloned().unwrap_or_default())
+                    .map(|tv| tv.payload.clone())
                     .unwrap_or_default();
+                // Execute-python outputs are `{stdout, stderr}` envelopes. When
+                // the input is such an envelope, iterate the JSON array printed
+                // on stdout (compiler-injected `task_inputs` node relies on
+                // this). A literal array iterates directly.
+                let items = match items.as_array() {
+                    Some(arr) => arr.clone(),
+                    None => items
+                        .get("stdout")
+                        .and_then(|s| s.as_str())
+                        .and_then(|s| serde_json::from_str::<Vec<serde_json::Value>>(s).ok())
+                        .unwrap_or_default(),
+                };
                 let max = spec.max_iterations.map(|m| m as usize);
                 let mut collected: Vec<serde_json::Value> = Vec::new();
                 for (i, item) in items.iter().enumerate() {
@@ -918,6 +930,15 @@ impl RuntimeImpl {
                     other => other.to_string(),
                 };
                 let resolved_content = resolve_ref(&content_str, env).await;
+                // Execute-python outputs are `{stdout, stderr}` envelopes; a
+                // report artifact is the text on stdout, not the envelope.
+                let resolved_content = match serde_json::from_str::<Value>(&resolved_content) {
+                    Ok(Value::Object(m)) => match m.get("stdout").and_then(|s| s.as_str()) {
+                        Some(s) => s.to_string(),
+                        None => resolved_content,
+                    },
+                    _ => resolved_content,
+                };
                 let bytes = resolved_content.into_bytes();
                 // Write to host filesystem so the artifact is usable.
                 let _ = tokio::fs::write(path_str, &bytes).await;
@@ -1046,6 +1067,25 @@ async fn resolve_dotted(
 /// Resolves a single `$name` / `${name}` token: exact env lookup first, then
 /// dotted path walk. Returns the token unchanged when unresolvable.
 async fn resolve_ref_token(token: &str, env: &Arc<Mutex<HashMap<String, TypedValue>>>) -> String {
+    resolve_ref_token_inner(token, env, false).await
+}
+
+/// Like [`resolve_ref_token`], but lists and records are JSON-*escaped* so the
+/// result can be embedded inside a Python/JSON string literal:
+/// `raw = "${per_file_results}"` must yield valid Python. Consumers then
+/// `json.loads(...)` the text back into structured data.
+async fn resolve_ref_token_escaped(
+    token: &str,
+    env: &Arc<Mutex<HashMap<String, TypedValue>>>,
+) -> String {
+    resolve_ref_token_inner(token, env, true).await
+}
+
+async fn resolve_ref_token_inner(
+    token: &str,
+    env: &Arc<Mutex<HashMap<String, TypedValue>>>,
+    escape: bool,
+) -> String {
     let tv = {
         let guard = env.lock().await;
         let name = token
@@ -1064,6 +1104,13 @@ async fn resolve_ref_token(token: &str, env: &Arc<Mutex<HashMap<String, TypedVal
     match tv {
         Some(tv) => match &tv.payload {
             Value::String(s) => s.clone(),
+            Value::Array(_) | Value::Object(_) if escape => {
+                let s = serde_json::to_string(&tv.payload).unwrap_or_default();
+                s.replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\n', "\\n")
+                    .replace('\r', "\\r")
+            }
             other => other.to_string(),
         },
         None => token.to_string(),
@@ -1091,7 +1138,7 @@ async fn resolve_ref(ref_str: &str, env: &Arc<Mutex<HashMap<String, TypedValue>>
         result.push_str(&rest[..start]);
         if let Some(end) = rest[start..].find('}') {
             let token = &rest[start..start + end + 1];
-            result.push_str(&resolve_ref_token(token, env).await);
+            result.push_str(&resolve_ref_token_escaped(token, env).await);
             rest = &rest[start + end + 1..];
         } else {
             result.push_str(&rest[start..]);

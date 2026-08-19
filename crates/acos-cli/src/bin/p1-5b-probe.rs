@@ -7,11 +7,17 @@
 //! Input Binding Accuracy (do generated read_file paths match declared
 //! TaskSpec.inputs paths?).
 //!
+//! v0.2 mode (`--plan`): runs the Structured Program Synthesis frontend
+//! (`compile_plan_traced`) — the LLM produces a Plan IR, the deterministic
+//! compiler lowers it to CIR. The trace records the final Plan IR alongside
+//! the compiled CIR for Experiment A (Control Flow Discovery) and
+//! Experiment B (Two-stage Compilation) metrics.
+//!
 //! Probe-2: run with `--out-dir .../probe-2-results` so Probe-1 records in
 //! `probe-results/` are never overwritten.
 //!
 //! Usage (from workspace root):
-//!   cargo run -p acos-cli --bin p1-5b-probe -- [--runs 3] [--task PATH] [--gt PATH] [--out-dir DIR]
+//!   cargo run -p acos-cli --bin p1-5b-probe -- [--runs 3] [--task PATH] [--gt PATH] [--out-dir DIR] [--plan]
 //!
 //! Requires `LONGCAT_API_KEY` in the environment or `.env`.
 
@@ -48,6 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let start_index: usize = get_arg(&args, "--start-index")
         .and_then(|s| s.parse().ok())
         .unwrap_or(1);
+    let plan_mode = args.iter().any(|a| a == "--plan");
 
     if let Err(e) = try_load_env() {
         eprintln!("[warn] .env not loaded: {e}");
@@ -60,6 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let declared_paths: HashSet<String> = task_spec.inputs.iter().map(|i| i.path.clone()).collect();
 
     println!("P1-5B Discovery Probe (Behavioral Requirements Analysis)");
+    println!("  mode: {}", if plan_mode { "PLAN (v0.2 Structured Program Synthesis)" } else { "CIR (v0.1 direct)" });
     println!("  task: {task_path}");
     println!("  ground_truth: {gt_path}");
     println!("  runs: {runs}");
@@ -77,7 +85,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let compiler = ModelCompiler::from_env()
             .map_err(|e| format!("ModelCompiler::from_env failed (set LONGCAT_API_KEY?): {e}"))?;
-        let traced = compiler.compile_traced(&task_spec, MAX_REPAIR_ATTEMPTS).await;
+        let traced = if plan_mode {
+            compiler.compile_plan_traced(&task_spec, MAX_REPAIR_ATTEMPTS).await
+        } else {
+            compiler.compile_traced(&task_spec, MAX_REPAIR_ATTEMPTS).await
+        };
 
         let compile_ok = traced.result.is_ok();
 
@@ -418,9 +430,24 @@ fn build_trace_json(
     };
 
     let cir_json = program.and_then(|p| serde_json::to_value(p).ok());
+    let plan_json = t.plan.as_ref().and_then(|p| serde_json::to_value(p).ok());
+
+    let plan_metrics = t.plan.as_ref().map(|p| {
+        let step_count = p.steps.len();
+        let foreach_count = count_step_kind(&p.steps, "foreach");
+        let conditional_count = count_step_kind(&p.steps, "conditional");
+        let retry_count = count_step_kind(&p.steps, "retry");
+        serde_json::json!({
+            "step_count": step_count,
+            "foreach_count": foreach_count,
+            "conditional_count": conditional_count,
+            "retry_count": retry_count,
+            "control_intent_count": foreach_count + conditional_count + retry_count,
+        })
+    });
 
     let record = serde_json::json!({
-        "run": { "run_index": run_idx, "timestamp": iso_timestamp(), "model": "LongCat-2.0", "compile_success": compile_success, "final_error": t.final_error },
+        "run": { "run_index": run_idx, "timestamp": iso_timestamp(), "model": "LongCat-2.0", "mode": if t.plan.is_some() { "plan" } else { "cir" }, "compile_success": compile_success, "final_error": t.final_error },
         "contract": contract,
         "input": { "task_spec_path": task_path, "prompt_sent": t.initial_prompt },
         "output": {
@@ -430,8 +457,10 @@ fn build_trace_json(
             "repair_traces": t.repair_attempts.iter().map(|r| serde_json::json!({
                 "attempt": r.attempt, "prompt": r.prompt, "raw_response": r.response, "validation_error": r.validation_error,
             })).collect::<Vec<_>>(),
+            "final_plan": plan_json,
             "final_cir": cir_json,
         },
+        "plan_metrics": plan_metrics,
         "program_metrics": metrics_json,
         "behavioral_analysis": behavioral,
         "execution": execution,
@@ -439,4 +468,17 @@ fn build_trace_json(
         "repair_tax": { "first_pass_success": t.initial_error.is_none(), "repair_attempts_used": t.repair_attempts.len(), "repair_latency_ms": t.timing.repair_llm_ms },
     });
     serde_json::to_string_pretty(&record).unwrap_or_default()
+}
+
+/// Counts steps of a given kind across the whole plan tree.
+fn count_step_kind(steps: &[acos_compiler::plan::PlanStep], kind: &str) -> usize {
+    steps.iter().fold(0usize, |acc, s| {
+        let mine = match s.kind {
+            acos_compiler::plan::StepKind::Foreach => "foreach",
+            acos_compiler::plan::StepKind::Conditional => "conditional",
+            acos_compiler::plan::StepKind::Retry => "retry",
+            acos_compiler::plan::StepKind::Primitive => "primitive",
+        };
+        acc + usize::from(mine == kind) + count_step_kind(&s.body, kind)
+    })
 }

@@ -169,7 +169,7 @@ pub fn validate_data_contract(program: &CirProgram) -> Result<(), CompilerError>
         // R2: a node's own output is visible to its enclosing scope — but only
         // kinds whose outputs the runtime actually binds (primitive invocations
         // and loop aggregates; containers are rejected above).
-        if node.kind == CirNodeKind::PrimitiveInvocation {
+        if matches!(node.kind, CirNodeKind::PrimitiveInvocation | CirNodeKind::LoopMap) {
             if let Some(o) = &node.output {
                 produced.insert(o.name.clone(), o.clone());
             }

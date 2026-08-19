@@ -1,0 +1,215 @@
+{
+  "goal": "Analyze all quarterly sales CSV files: detect data-quality issues, repair recoverable issues, compute quarterly statistics, merge results, and generate a consolidated Markdown report with evidence log.",
+  "steps": [
+    {
+      "name": "analyze_each",
+      "kind": "foreach",
+      "description": "process each declared input file",
+      "over": "inputs",
+      "output": {
+        "name": "per_file_results",
+        "typeName": "List<FileAnalysis>",
+        "fields": []
+      },
+      "body": [
+        {
+          "name": "validate_file",
+          "kind": "primitive",
+          "description": "load file and detect data-quality issues",
+          "capability": "execute_python",
+          "code": "import csv, json\npath = \"${item}\"\nwith open(path, newline=\"\", encoding=\"utf-8-sig\") as f:\n    reader = csv.reader(f)\n    header = [h.strip() for h in next(reader)]\n    rows = [r for r in reader]\nissues = []\nif any(len(r) != len(header) for r in rows):\n    issues.append(\"field_count_mismatch\")\nfor r in rows:\n    for v in r:\n        if v.strip() in (\"\", \"NA\", \"N/A\", \"NULL\", \"null\", \"nan\", \"-\"):\n            issues.append(\"missing_value\")\n            break\nprint(json.dumps({\"file\": path, \"row_count\": len(rows), \"has_issues\": len(issues) > 0, \"issues\": issues}))",
+          "inputBindings": [],
+          "output": {
+            "name": "validation_result",
+            "typeName": "ValidationResult",
+            "fields": [
+              {
+                "name": "file",
+                "typeName": "String"
+              },
+              {
+                "name": "row_count",
+                "typeName": "Integer"
+              },
+              {
+                "name": "has_issues",
+                "typeName": "Boolean"
+              },
+              {
+                "name": "issues",
+                "typeName": "List"
+              }
+            ]
+          }
+        },
+        {
+          "name": "fix_if_needed",
+          "kind": "conditional",
+          "description": "repair recoverable issues when validation found any",
+          "condition": "exists(validation_result)",
+          "body": [
+            {
+              "name": "repair_file",
+              "kind": "primitive",
+              "description": "repair unquoted currency field splits",
+              "capability": "execute_python",
+              "code": "import csv, json\npath = \"${item}\"\ndef repair_field_count(row, ncols):\n    merged = []\n    i = 0\n    while i < len(row):\n        cur = row[i].strip()\n        if cur.startswith(\"$\") and i + 1 < len(row) and row[i + 1].replace(\".\", \"\", 1).isdigit():\n            merged.append(cur + \",\" + row[i + 1].strip())\n            i += 2\n        else:\n            merged.append(cur)\n            i += 1\n    return merged[:ncols] if len(merged) >= ncols else merged + [\"\"] * (ncols - len(merged))\nrepaired = 0\nwith open(path, newline=\"\", encoding=\"utf-8-sig\") as f:\n    reader = csv.reader(f)\n    header = [h.strip() for h in next(reader)]\n    rows = []\n    for raw in reader:\n        if len(raw) != len(header):\n            fixed = repair_field_count(raw, len(header))\n            if fixed != raw:\n                repaired += 1\n            raw = fixed\n        rows.append(raw)\nprint(json.dumps({\"file\": path, \"currency_repairs\": repaired}))",
+              "inputBindings": [],
+              "output": {
+                "name": "repaired_content",
+                "typeName": "RepairResult",
+                "fields": [
+                  {
+                    "name": "file",
+                    "typeName": "String"
+                  },
+                  {
+                    "name": "currency_repairs",
+                    "typeName": "Integer"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "analyze_file",
+          "kind": "retry",
+          "description": "compute statistics with retry on transient failures",
+          "capability": "execute_python",
+          "retry": {
+            "maxAttempts": 3
+          },
+          "code": "import csv, json\nfrom pathlib import Path\npath = \"${item}\"\nSTANDARD = [\"date\", \"product\", \"category\", \"units\", \"revenue\"]\nALIASES = {\"date\": [\"date\", \"transaction_date\"], \"product\": [\"product\", \"item_name\"], \"category\": [\"category\", \"item_category\"], \"units\": [\"units\", \"quantity\"], \"revenue\": [\"revenue\", \"sales\"]}\nMISSING = {\"\", \"NA\", \"N/A\", \"NULL\", \"null\", \"nan\", \"-\"}\ndef repair_field_count(row, ncols):\n    merged = []\n    i = 0\n    while i < len(row):\n        cur = row[i].strip()\n        if cur.startswith(\"$\") and i + 1 < len(row) and row[i + 1].replace(\".\", \"\", 1).isdigit():\n            merged.append(cur + \",\" + row[i + 1].strip())\n            i += 2\n        else:\n            merged.append(cur)\n            i += 1\n    return merged[:ncols] if len(merged) >= ncols else merged + [\"\"] * (ncols - len(merged))\ndef parse_number(v):\n    s = v.strip()\n    if s in MISSING:\n        return None\n    try:\n        return float(s)\n    except ValueError:\n        return None\ndef detect_outliers(revenues):\n    nums = sorted(v for v in revenues if v is not None and v >= 0)\n    if len(nums) < 4:\n        return []\n    median = nums[len(nums) // 2]\n    threshold = max(median * 10.0, 100.0)\n    return [i for i, v in enumerate(revenues) if v is not None and v > threshold]\ncurrency_repairs = 0\nwith open(path, newline=\"\", encoding=\"utf-8-sig\") as f:\n    reader = csv.reader(f)\n    header = [h.strip() for h in next(reader)]\n    rows = []\n    for raw in reader:\n        if len(raw) != len(header):\n            fixed = repair_field_count(raw, len(header))\n            if fixed != raw:\n                currency_repairs += 1\n            raw = fixed\n        rows.append(raw)\nmapping = {}\nfor idx, col in enumerate(header):\n    norm = col.strip().lower()\n    for std, aliases in ALIASES.items():\n        if norm in aliases and std not in mapping:\n            mapping[std] = idx\n            break\nissues = []\nif currency_repairs > 0:\n    issues.append(\"currency_formatting\")\nif len(mapping) < len(STANDARD):\n    issues.append(\"column_name_drift\")\nnormalized = []\nfor row in rows:\n    rec = {}\n    for std in STANDARD:\n        idx = mapping.get(std)\n        rec[std] = row[idx] if idx is not None and idx < len(row) else \"\"\n    normalized.append(rec)\nmissing_count = 0\nfor rec in normalized:\n    for std in STANDARD:\n        if rec[std].strip() in MISSING:\n            missing_count += 1\nif missing_count > 0:\n    issues.append(\"missing_value_NA\")\nnormalized = [rec for rec in normalized if rec[\"units\"].strip().upper() != \"NULL\" and rec[\"revenue\"].strip().upper() != \"NULL\" and rec[\"date\"].strip().upper() != \"NULL\"]\nfor rec in normalized:\n    rec[\"revenue\"] = rec[\"revenue\"].replace(\"$\", \"\").replace(\",\", \"\")\n    rec[\"units\"] = rec[\"units\"].replace(\"$\", \"\").replace(\",\", \"\")\nseen = set()\ndeduped = []\nfor rec in normalized:\n    key = tuple(rec[std] for std in STANDARD)\n    if key not in seen:\n        seen.add(key)\n        deduped.append(rec)\nif len(deduped) < len(normalized):\n    issues.append(\"duplicate_rows\")\nnormalized = deduped\nhas_negative = any((parse_number(r[\"units\"]) or 0) < 0 or (parse_number(r[\"revenue\"]) or 0) < 0 for r in normalized)\nif has_negative:\n    issues.append(\"negative_values\")\nrevenues = [parse_number(rec[\"revenue\"]) for rec in normalized]\noutliers = detect_outliers(revenues)\nif outliers:\n    issues.append(\"extreme_outliers\")\ntotal_revenue = round(sum(v for v in revenues if v is not None), 2)\ntotal_units = round(sum(v for v in (parse_number(r[\"units\"]) for r in normalized) if v is not None), 2)\nname = Path(path).name\ndisplay = \"Q\" + name[6:-4].upper() if len(name) > 6 and name[6].isdigit() else name\nprint(json.dumps({\"file\": name, \"display_name\": display, \"row_count\": len(normalized), \"total_revenue\": total_revenue, \"total_units\": total_units, \"issues\": issues, \"currency_repairs\": currency_repairs, \"missing_count\": missing_count, \"outlier_rows\": [{\"row\": i + 2, \"product\": normalized[i][\"product\"], \"revenue\": revenues[i]} for i in outliers], \"negative_rows\": []}))",
+          "inputBindings": [],
+          "output": {
+            "name": "file_analysis",
+            "typeName": "FileAnalysis",
+            "fields": [
+              {
+                "name": "file",
+                "typeName": "String"
+              },
+              {
+                "name": "display_name",
+                "typeName": "String"
+              },
+              {
+                "name": "row_count",
+                "typeName": "Integer"
+              },
+              {
+                "name": "total_revenue",
+                "typeName": "Number"
+              },
+              {
+                "name": "total_units",
+                "typeName": "Number"
+              },
+              {
+                "name": "issues",
+                "typeName": "List"
+              },
+              {
+                "name": "currency_repairs",
+                "typeName": "Integer"
+              },
+              {
+                "name": "missing_count",
+                "typeName": "Integer"
+              },
+              {
+                "name": "outlier_rows",
+                "typeName": "List"
+              },
+              {
+                "name": "negative_rows",
+                "typeName": "List"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "merge_report",
+      "kind": "primitive",
+      "description": "merge per-file analyses into the consolidated report",
+      "capability": "execute_python",
+      "code": "import json\nraw = \"${per_file_results}\"\ndata = json.loads(raw)\nresults = []\nfor item in data:\n    try:\n        results.append(json.loads(item.get(\"stdout\", \"{}\") or \"{}\"))\n    except Exception:\n        pass\nlines = []\nlines.append(\"# P1 Flagship CSV Quality Report\")\nlines.append(\"\")\nlines.append(\"## data_quality\")\nfor r in results:\n    lines.append(\"### \" + r.get(\"display_name\", \"?\") + \" (\" + r.get(\"file\", \"?\") + \")\")\n    if r.get(\"issues\"):\n        lines.append(\"- Issues: \" + str(len(r[\"issues\"])))\n        for issue in r[\"issues\"]:\n            lines.append(\"  - \" + issue)\n    else:\n        lines.append(\"- Issues: 0 (clean)\")\n    lines.append(\"- Rows: \" + str(r.get(\"row_count\", 0)))\n    lines.append(\"\")\nlines.append(\"## quarterly_summary\")\nfor r in results:\n    display = r.get(\"display_name\", \"?\")\n    q_name = display.rsplit(\".\", 1)[0].rsplit(\"_\", 1)[-1] if \"_\" in display else display\n    lines.append(\"- \" + q_name + \" revenue: {:.2f}\".format(r.get(\"total_revenue\", 0)))\n    lines.append(\"- \" + r.get(\"display_name\", \"?\") + \" units: \" + str(r.get(\"total_units\", 0)))\nlines.append(\"\")\nlines.append(\"## anomalies\")\nfound_anom = False\nfor r in results:\n    for o in r.get(\"outlier_rows\", []):\n        found_anom = True\n        lines.append(\"- \" + r.get(\"file\", \"?\") + \" row \" + str(o[\"row\"]) + \": \" + str(o.get(\"product\", \"?\")) + \" revenue {:.2f} (extreme outlier)\".format(o[\"revenue\"]))\n    for n in r.get(\"negative_rows\", []):\n        found_anom = True\n        lines.append(\"- \" + r.get(\"file\", \"?\") + \" row \" + str(n[\"row\"]) + \": negative values\")\nif not found_anom:\n    lines.append(\"- No anomalies detected\")\nlines.append(\"\")\nlines.append(\"## recovery_log\")\nfor r in results:\n    actions = []\n    if r.get(\"currency_repairs\", 0) > 0:\n        actions.append(\"repaired \" + str(r[\"currency_repairs\"]) + \" unquoted currency field(s)\")\n    if \"duplicate_rows\" in r.get(\"issues\", []):\n        actions.append(\"removed duplicate rows (kept first occurrence)\")\n    if r.get(\"missing_count\", 0) > 0:\n        actions.append(\"flagged \" + str(r[\"missing_count\"]) + \" missing value(s); treated as 0 in revenue sums\")\n    if \"column_name_drift\" in r.get(\"issues\", []):\n        actions.append(\"aligned columns to standard schema via keyword mapping\")\n    lines.append(\"- \" + r.get(\"file\", \"?\") + \": \" + (\"; \".join(actions) if actions else \"no repairs needed\"))\nlines.append(\"\")\ntotal_issues = sum(len(r.get(\"issues\", [])) for r in results)\nfiles_with_issues = sum(1 for r in results if r.get(\"issues\"))\ngrand_total = round(sum(r.get(\"total_revenue\", 0) for r in results), 2)\nlines.append(\"## Aggregate\")\nlines.append(\"- Total files processed: \" + str(len(results)))\nlines.append(\"- Files with issues: \" + str(files_with_issues))\nlines.append(\"- Total issues found: \" + str(total_issues))\nlines.append(\"- Grand total revenue: {:.2f}\".format(grand_total))\nlines.append(\"\")\nprint(\"\\n\".join(lines))",
+      "inputBindings": [
+        {
+          "param": "per_file_results",
+          "source": "analyze_each",
+          "binding": "per_file_results"
+        }
+      ],
+      "output": {
+        "name": "report_record",
+        "typeName": "Report",
+        "fields": []
+      }
+    },
+    {
+      "name": "write_report",
+      "kind": "primitive",
+      "description": "persist the consolidated report artifact",
+      "capability": "write_file",
+      "writePath": "p1_flagship_report.md",
+      "code": null,
+      "inputBindings": [
+        {
+          "param": "content",
+          "source": "merge_report",
+          "binding": "report_record"
+        }
+      ],
+      "output": {
+        "name": "report_ref",
+        "typeName": "ArtifactRef",
+        "fields": [
+          {
+            "name": "id",
+            "typeName": "String"
+          },
+          {
+            "name": "path",
+            "typeName": "String"
+          }
+        ]
+      }
+    }
+  ],
+  "dataFlow": [
+    {
+      "fromStep": "analyze_each",
+      "toStep": "merge_report",
+      "binding": "per_file_results"
+    },
+    {
+      "fromStep": "merge_report",
+      "toStep": "write_report",
+      "binding": "report_record"
+    }
+  ],
+  "controlFlow": [
+    {
+      "step": "analyze_each",
+      "kind": "foreach",
+      "over": "inputs",
+      "condition": null
+    },
+    {
+      "step": "fix_if_needed",
+      "kind": "conditional",
+      "over": null,
+      "condition": "exists(validation_result)"
+    },
+    {
+      "step": "analyze_file",
+      "kind": "retry",
+      "over": null,
+      "condition": null
+    }
+  ]
+}

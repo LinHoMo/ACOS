@@ -1,8 +1,15 @@
-# ModelCompiler v0.2 — Structured Program Synthesis 实验设计（spec DRAFT）
+# ModelCompiler v0.2 — Structured Program Synthesis 实验设计（spec FROZEN）
 
-> **状态**: DRAFT（待用户批准冻结）。
+> **状态**: FROZEN（用户批准冻结，2026-08-19；批准后直接进入实现，未做进一步修改）。
 > **日期**: 2026-08-19 · **代码版本**: main @ `5f5525a`（P1-4 FROZEN）。
 > **动机**: P1-5B v0.1 负结果——`Task → LLM → CIR` 单次生成失败层级为 Program Design Failure（run-005：契约全过但零控制流、程序不满足任务）。失败原因**不是 JSON 输出**，而是**缺少中间认知结构**。
+> **批准时新增的硬性要求（用户确认，全部纳入冻结）**：
+> 1. **映射是 total function**：合法 Plan → 合法 CIR（validator 接受 ⇒ compiler 必成功；compile_plan 末尾以 validate_cir_semantic + validate_data_contract 作为内部哨兵）。
+> 2. **契约内建**：undefined binding = Plan compilation error（非 runtime error）。
+> 3. **Experiment A 新增指标 Control Intent Recall**（模型生成的 foreach/conditional/retry 意图中真正被编译器采纳的比例）。
+> 4. **命题 B 判定（新阈值）**：Compile ≥ 80% ∧ Plan completeness ≥ 70% ∧ Adequacy ≥ 60%。
+> 5. **禁止项**：prompt 不得注入 Golden Plan；PlanIR 不得 hardcode 旗舰内容；PlanIR 不得包含 CIR 节点。
+> 6. **实施顺序**：T1 Plan IR schema → T2 validator → T3 Plan→CIR compiler → T4 frontend switch（先不改 LLM prompt）→ T5 Contract → T6 harness。
 
 ---
 
@@ -109,7 +116,7 @@ struct PlanStep { name: String, kind: StepKind, capability: Option<String>,
 ### Experiment A: Control Flow Discovery
 - 目标：验证 LLM 能否发现控制结构（foreach/conditional/retry）。
 - 输入：P1-FLAGSHIP-001（天然需要 foreach 多文件 + conditional 按问题修复 + retry 暂态）。
-- 指标：**Plan completeness**（Plan 步骤覆盖任务行为要求的比例）、**Control coverage**（required 控制结构 vs 生成的 foreach/conditional/retry 数量）、binding 引用闭合率。
+- 指标：**Plan completeness**（Plan 步骤覆盖任务行为要求的比例）、**Control coverage**（required 控制结构 vs 生成的 foreach/conditional/retry 数量）、**Control Intent Recall**（模型声明的控制意图中被编译器采纳的比例）、binding 引用闭合率。
 - 运行：×5，同 v0.1 条件。成功标准不预设。
 
 ### Experiment B: Two-stage Compilation（核心实验）
@@ -130,7 +137,7 @@ struct PlanStep { name: String, kind: StepKind, capability: Option<String>,
 
 ## 6. 判定（命题 B 复查）
 
-- 若 B 组四层显著优于 v0.1（Compile ≥ 4/5 且 Adequacy ≥ 3/5 且非 repair 依赖）：命题 B **初步支持**（架构升级方向有效）。
+- **命题 B 判定（用户批准阈值）**：Compile ≥ 80%（×5 中 ≥ 4）∧ Plan completeness ≥ 70% ∧ Adequacy ≥ 60%（×5 中 ≥ 3）——三者同时满足即命题 B **支持**（架构升级方向有效）。
 - 若 Compile 改善但 Execute/Adequacy 未动：命题 B 维持暂不支持，v0.3 方向 = Plan 验证器（Plan 层语义检查）。
 - 若 Compile 未改善：支持"LLM 无法生成可验证程序"的更强结论，转向 Optimizer/人工引导路径。
 
@@ -143,13 +150,27 @@ struct PlanStep { name: String, kind: StepKind, capability: Option<String>,
 5. 报告：`SUCCESS-006-p1-modelcompiler-v0.2.md`（矩阵 + Plan 指标 + 命题 B 判定）。
 6. 推送 GitHub main。
 
-## 8. 冻结清单（批准后生效）
+## 8. 冻结清单（已批准生效）
 
 - Plan IR schema（§2）、Plan→CIR 映射（§3）
 - 任务/数据集/GT/oracle/模型/超时：与 P1-5B v0.1 相同
 - Runtime/Contract/Verifier 代码不修改
 - v0.1 历史数据不修改
 - 模型温度等配置与 v0.1 相同（保留随机性）
+- **total function**：合法 Plan ⇒ compile_plan 必成功（validate_cir_semantic + validate_data_contract 作为 compile_plan 内部哨兵）
+- **契约内建**：undefined binding / missing field 在编译期报错（PlanCompileError），不产生运行时失败
+- **禁止项**：prompt 不注入 Golden Plan；PlanIR 不含旗舰任务内容 hardcode；PlanIR 不含 CIR 节点
+- **实施顺序**：T1 schema → T2 validator → T3 compiler → T4 frontend → T5 contract → T6 harness
+
+### 实现记录（FROZEN 后，按批准顺序实现时的设计落地）
+
+- `over: "inputs"` 特例：编译器生成 `task_inputs` 注入节点（execute_python，代码为编译器模板、路径来自 TaskSpec 而非 LLM——P1-5B-A 路径幻觉防护），绑定 `input_files: List<String>`，作为根序列第一个 child。
+- item_var 固定 `"item"`（ITEM_VAR），禁止 shadow；保留名 `item` / `task_inputs` / `plan_root`。
+- 步骤作用域：siblings + outer 双 map（body 步骤可解析外层绑定）。
+- `writePath`：write_file 步骤必填输出路径（输出路径属 Plan 所有；输入路径 Plan 永不书写）。
+- Parallel 容器步骤不支持（契约拒绝容器声明 output）。
+- 运行时信封语义（Plan 作者的契约基础）：execute_python 输出为 `{stdout, stderr}` record；模板插值 `${binding}` 对 List/Record 产出**可嵌入 Python 字符串字面量的转义 JSON**（消费方 `json.loads`）；ForEach 输入若为 record 信封则迭代 stdout 中的 JSON 数组；write_file 的 content 若为信封则取其 stdout。
+- 冒烟验证：`plan-smoke.json`（手写黄金 Plan，测试基建，禁止入 prompt）经全管线（validate→compile→contract→execute→structural 4/4→semantic 6/6→evidence 3/3）通过。
 
 ## 9. 风险与对策
 
