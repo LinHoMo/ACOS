@@ -68,10 +68,16 @@ function Get-PlanSteps($j) {
     $steps
 }
 
+function Is-ExternalFailure($j) {
+    ($j.run.final_error -and $j.run.final_error -match "external system failure") -or
+    ($j.repair_tax -and $j.repair_tax.repair_attempts_used -eq 0 -and $j.run.final_error -match "external system failure")
+}
+
 function Get-Layer($dir, $layer) {
-    $passed = 0; $total = 0
+    $passed = 0; $total = 0; $external = 0
     foreach ($f in (Get-ChildItem $dir -Filter "run-*.trace.json" | Sort-Object Name)) {
         $j = Get-Content $f.FullName -Raw | ConvertFrom-Json
+        if (Is-ExternalFailure $j) { $external++; continue }
         $total++
         $ok = switch ($layer) {
             "compile"  { $j.run.compile_success -eq $true }
@@ -81,13 +87,14 @@ function Get-Layer($dir, $layer) {
         }
         if ($ok) { $passed++ }
     }
-    [ordered]@{ passed = $passed; total = $total; rate = if ($total) { "{0:P0}" -f ($passed / $total) } else { "N/A" } }
+    [ordered]@{ passed = $passed; total = $total; external = $external; rate = if ($total) { "{0:P0}" -f ($passed / $total) } else { "N/A" } }
 }
 
 function Get-V04Metrics($dir) {
-    $total = 0; $pyRuns = 0; $serFail = 0; $envFail = 0; $envPersist = 0; $reps = @()
+    $total = 0; $pyRuns = 0; $serFail = 0; $envFail = 0; $envPersist = 0; $external = 0; $reps = @()
     foreach ($f in (Get-ChildItem $dir -Filter "run-*.trace.json" | Sort-Object Name)) {
         $j = Get-Content $f.FullName -Raw | ConvertFrom-Json
+        if (Is-ExternalFailure $j) { $external++; continue }
         $total++
         $steps = Get-PlanSteps $j
         $hasPy = @($steps | Where-Object { $_.capability -eq "execute_python" }).Count -gt 0
@@ -107,6 +114,7 @@ function Get-V04Metrics($dir) {
     $repAvg = if ($reps.Count) { "{0:N2}" -f (($reps | Measure-Object -Average).Average) } else { "N/A" }
     [ordered]@{
         total = $total
+        external = $external
         serialization_failure_rate = if ($total) { "{0:P0}" -f ($serFail / $total) } else { "N/A" }
         serialization_failures = $serFail
         py_runs = $pyRuns
