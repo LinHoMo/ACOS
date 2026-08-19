@@ -94,6 +94,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "  v0.4 factors: serialization_teaching={serialization_teaching}, structured_inputs={structured_inputs}"
     );
+    let llm_provider = std::env::var("ACOS_LLM_PROVIDER").unwrap_or_else(|_| "anthropic".into());
+    let llm_model = std::env::var("ACOS_LLM_MODEL").unwrap_or_else(|_| "LongCat-2.0".into());
+    let llm_base = std::env::var("LONGCAT_BASE_URL").unwrap_or_else(|_| "(default)".into());
+    let llm_key_len = std::env::var("LONGCAT_API_KEY")
+        .or_else(|_| std::env::var("OPENAI_API_KEY"))
+        .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
+        .map(|k| k.len())
+        .unwrap_or(0);
+    println!("  llm: provider={llm_provider}, model={llm_model}, base={llm_base}, key_len={llm_key_len}");
     println!();
 
     tokio::fs::create_dir_all(&out_dir).await.ok();
@@ -388,7 +397,12 @@ fn try_load_env() -> Result<(), Box<dyn std::error::Error>> {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') { continue; }
         if let Some((k, v)) = line.split_once('=') {
-            std::env::set_var(k.trim(), v.trim());
+            let k = k.trim();
+            // Prefer an already-set environment variable (shell/session wins
+            // over `.env`); only fill unset keys.
+            if std::env::var_os(k).is_none() {
+                std::env::set_var(k, v.trim());
+            }
         }
     }
     Ok(())
@@ -469,7 +483,7 @@ fn build_trace_json(
     });
 
     let record = serde_json::json!({
-        "run": { "run_index": run_idx, "timestamp": iso_timestamp(), "model": "LongCat-2.0", "mode": if t.plan.is_some() { "plan" } else { "cir" }, "compile_success": compile_success, "final_error": t.final_error },
+        "run": { "run_index": run_idx, "timestamp": iso_timestamp(), "model": std::env::var("ACOS_LLM_MODEL").unwrap_or_else(|_| "LongCat-2.0".into()), "mode": if t.plan.is_some() { "plan" } else { "cir" }, "compile_success": compile_success, "final_error": t.final_error },
         "contract": contract,
         "input": { "task_spec_path": task_path, "prompt_sent": t.initial_prompt },
         "output": {

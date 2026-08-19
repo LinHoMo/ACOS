@@ -23,7 +23,8 @@ param(
     [string]$ControlDir = "experiments/p1-5b-cognitive-program-discovery/formal-eval-v0.3-results-c",
     [int]$ModelRuns = 5,
     [int[]]$Arm = @(1, 2, 3),
-    [switch]$AggregateOnly
+    [switch]$AggregateOnly,
+    [string]$Model = "LongCat-2.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -196,7 +197,7 @@ $lines = @(
     "## P1-5B Formal Evaluation v0.4 (Primitive Invocation Contract & Structured Inputs)",
     "",
     "- Groups: S0 = historical frozen control (v0.3 C traces @ f613592, NOT re-sampled); S1 = serialization teaching; S2 = Structured Inputs Package; S3 = combined",
-    "- Runs: S1/S2/S3 x $ModelRuns each (fresh samples), P1-FLAGSHIP-001, LongCat-2.0, main @ 719fc60",
+    "- Runs: S1/S2/S3 x $ModelRuns each (fresh samples), P1-FLAGSHIP-001, model: $Model (provider via ACOS_LLM_PROVIDER; S0 = LongCat-2.0 historical @ f613592), main @ 719fc60",
     "- Spec: docs/specs/2026-08-19-p1-5b-v0.4-primitive-invocation-contract-structured-inputs-design.md (FROZEN)",
     "",
     "### Layer matrix (S0 vs S1/S2/S3)",
