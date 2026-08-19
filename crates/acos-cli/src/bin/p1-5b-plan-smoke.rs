@@ -27,16 +27,19 @@ const GT_PATH: &str = "tests/benchmarks/p1/flagship_csv_quality/expected/ground_
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let plan_raw = std::fs::read_to_string(PLAN_PATH)?;
+    let plan_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| PLAN_PATH.to_string());
+    let plan_raw = std::fs::read_to_string(&plan_path)?;
     let plan: PlanIR = serde_json::from_str(&plan_raw)
-        .map_err(|e| format!("failed to parse {PLAN_PATH}: {e}"))?;
+        .map_err(|e| format!("failed to parse {plan_path}: {e}"))?;
 
     let task_yaml = std::fs::read_to_string(TASK_PATH)?;
     let task = from_yaml(&task_yaml)?;
     let ground_truth = GroundTruth::from_yaml(GT_PATH)?;
 
-    println!("P1-5B v0.2 pipeline smoke");
-    println!("  plan: {PLAN_PATH}");
+    println!("P1-5B v0.2/v0.3 pipeline smoke");
+    println!("  plan: {plan_path}");
     println!("  task: {TASK_PATH}");
 
     // 1. Plan validation (must pass; the plan is authored valid).

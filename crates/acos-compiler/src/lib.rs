@@ -31,7 +31,7 @@ pub mod plan;
 mod contract;
 
 pub use replan::ModelRecoveryPlanner;
-pub use plan::{PlanIR, compile_plan, validate_plan};
+pub use plan::{PlanIR, compile_plan, validate_plan, validate_plan_with_allowlist};
 
 use crate::contract::validate_data_contract;
 
@@ -203,6 +203,42 @@ const ALLOWED_CAPABILITIES: &[&str] = &[
     "unstable_search",
 ];
 
+/// P1-5B v0.3 experiment B (Observe): `csv.inspect_schema` is available for
+/// schema observation, but the enforcing `csv.aggregate` is NOT — aggregation
+/// still goes through `execute_python`.
+const ALLOWED_CAPABILITIES_OBSERVE: &[&str] = &[
+    "search",
+    "read_file",
+    "write_file",
+    "execute_python",
+    "summarize",
+    "csv.inspect_schema",
+    "flaky_search",
+    "list_source",
+    "irreversible",
+    "unstable_search",
+];
+
+/// P1-5B v0.3 experiment mode: which CSV capabilities the model may use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CsvMode {
+    /// Experiment B: observe schema via `csv.inspect_schema`; aggregation
+    /// still requires hand-written `execute_python` code.
+    Observe,
+    /// Experiment C: `csv.aggregate` (runtime schema enforcement) is
+    /// available. Default.
+    Enforce,
+}
+
+impl CsvMode {
+    fn allowlist(self) -> &'static [&'static str] {
+        match self {
+            CsvMode::Observe => ALLOWED_CAPABILITIES_OBSERVE,
+            CsvMode::Enforce => ALLOWED_CAPABILITIES,
+        }
+    }
+}
+
 /// Allowed effect kinds (must match EffectKind serde variants).
 const ALLOWED_EFFECT_KINDS: &[&str] = &[
     "fs_read",
@@ -325,22 +361,10 @@ Each step is a JSON object with a `kind` from the following table:
 Common fields:
 - `name`: unique identifier (letters, digits, underscore; must not start with a digit).
 - `description`: one sentence about what the step does (optional).
-- `capability`: one of `search`, `read_file`, `write_file`, `execute_python`, `summarize`, `csv.inspect_schema`, `csv.aggregate`.
+- `capability`: one of `search`, `read_file`, `write_file`, `execute_python`, `summarize`, __CSV_CAPABILITIES__.
 - `code`: Python code for `execute_python` steps. It may reference values produced by earlier steps as `${outputName}` (and `${item}` inside a foreach body). The code runs inside the ACOS sandbox with a populated `env`; return values via `env["name"] = value` or plain variable assignment.
 
-# CSV capabilities (structured operations — no Python)
-
-For CSV data, prefer these over `execute_python` — they are deterministic and
-schema-aware:
-
-- `csv.inspect_schema`: parameters `code: {"path": "${item}"}` (or an earlier
-  binding). Returns a report of `columns` (name + inferred type), `row_count`,
-  and `issues`. Inspect a file FIRST, then reference only the columns it
-  reports.
-- `csv.aggregate`: parameters `code: {"path": ..., "columns": ["col_a", ...]}`.
-  Sums the referenced columns (missing values count as 0). **Unknown column
-  names are rejected at runtime** — only use columns reported by
-  `csv.inspect_schema`.
+__CSV_SECTION__
 - `inputBindings`: array of `{ "param": <name>, "source": <step name>, "binding": <output name> }` — bind a previous step's output to a parameter.
 - `output`: `{ "name": <unique identifier>, "typeName": <type>, "fields": [ { "name": ..., "typeName": "Number"|"Integer"|"String"|"Boolean"|"List"|"Record"|"Any" } ] }`. `typeName` must be non-empty; use `List<X>` for lists of `X`. `fields` documents record schemas (may be empty).
 - `retry` (retry steps only): `{ "maxAttempts": <>= 2> }`.
@@ -371,12 +395,53 @@ Respond with ONLY the plan JSON, no markdown, no commentary, no code fences.
 
 "#;
 
+/// P1-5B v0.3 experiment C: `csv.inspect_schema` + enforcing `csv.aggregate`.
+const CSV_SECTION_ENFORCE: &str = r#"# CSV capabilities (structured operations — no Python)
+
+For CSV data, prefer these over `execute_python` — they are deterministic and
+schema-aware:
+
+- `csv.inspect_schema`: parameters `code: {"path": "${item}"}` (or an earlier
+  binding). Returns a report of `columns` (name + inferred type), `row_count`,
+  and `issues`. Inspect a file FIRST, then reference only the columns it
+  reports.
+- `csv.aggregate`: parameters `code: {"path": ..., "columns": ["col_a", ...]}`.
+  Sums the referenced columns deterministically: unquoted currency splits are
+  merged, rows with a literal `NULL` value are dropped (N/A/empty cells sum
+  as 0), duplicate rows keep the first occurrence, negatives are included.
+  **Unknown column names are rejected at runtime** — only use columns
+  reported by `csv.inspect_schema`.
+"#;
+
+/// P1-5B v0.3 experiment B: schema observation only, no enforcing capability.
+const CSV_SECTION_OBSERVE: &str = r#"# CSV capabilities (structured operations — no Python)
+
+For CSV data, you may inspect the schema first:
+
+- `csv.inspect_schema`: parameters `code: {"path": "${item}"}` (or an earlier
+  binding). Returns a report of `columns` (name + inferred type), `row_count`,
+  and `issues`. Inspect a file FIRST, then write aggregation code that
+  references only the columns it reports.
+"#;
+
+/// Builds the planner system prompt for the given experiment mode.
+fn plan_system_prompt(mode: CsvMode) -> String {
+    let (csv_caps, csv_section) = match mode {
+        CsvMode::Enforce => ("csv.inspect_schema, csv.aggregate", CSV_SECTION_ENFORCE),
+        CsvMode::Observe => ("csv.inspect_schema", CSV_SECTION_OBSERVE),
+    };
+    PLAN_SYSTEM_PROMPT
+        .replace("__CSV_CAPABILITIES__", csv_caps)
+        .replace("__CSV_SECTION__", csv_section)
+}
+
 // ── ModelCompiler ────────────────────────────────────────────────────────────
 
 /// Model-assisted compiler: asks Claude to generate the CIR.
 #[derive(Debug, Clone)]
 pub struct ModelCompiler {
     llm: acos_llm::LongCatClient,
+    csv_mode: CsvMode,
 }
 
 /// Full trace of a single compile operation (used by P1-5B Discovery Probe).
@@ -440,12 +505,20 @@ pub struct TracedCompile {
 impl ModelCompiler {
     /// Creates a model compiler backed by the given LLM client.
     pub fn new(llm: acos_llm::LongCatClient) -> Self {
-        Self { llm }
+        Self {
+            llm,
+            csv_mode: CsvMode::Enforce,
+        }
     }
 
     /// Creates a model compiler from environment configuration.
     pub fn from_env() -> Result<Self, AcosError> {
         Ok(Self::new(acos_llm::LongCatClient::from_env()?))
+    }
+
+    /// Selects the P1-5B v0.3 CSV capability mode (Observe vs Enforce).
+    pub fn set_csv_mode(&mut self, mode: CsvMode) {
+        self.csv_mode = mode;
     }
 
     /// Builds a **structured Compile Context** prompt from the TaskSpec.
@@ -932,7 +1005,8 @@ impl ModelCompiler {
             }
         })?;
 
-        validate_plan(&plan).map_err(|message| CompilerError::JsonShapeError { message })?;
+        validate_plan_with_allowlist(&plan, self.csv_mode.allowlist())
+            .map_err(|message| CompilerError::JsonShapeError { message })?;
 
         Ok(plan)
     }
@@ -951,6 +1025,7 @@ impl ModelCompiler {
     ) -> TracedCompile {
         let task_id = task.id;
         let user_prompt = self.build_plan_user_prompt(task);
+        let system_prompt = plan_system_prompt(self.csv_mode);
         let mut trace = CompileTrace {
             initial_prompt: user_prompt.clone(),
             initial_response: String::new(),
@@ -964,7 +1039,7 @@ impl ModelCompiler {
         let mut diagnostics: Vec<Diagnostic> = vec![];
 
         let init_start = std::time::Instant::now();
-        let raw = match self.llm.complete(PLAN_SYSTEM_PROMPT, &user_prompt).await {
+        let raw = match self.llm.complete(&system_prompt, &user_prompt).await {
             Ok(r) => r,
             Err(e) => {
                 trace.timing.total_ms = total_start.elapsed().as_millis() as u64;
@@ -1035,7 +1110,7 @@ impl ModelCompiler {
                     });
 
                     let repair_start = std::time::Instant::now();
-                    match self.llm.complete(PLAN_SYSTEM_PROMPT, &repair_prompt).await {
+                    match self.llm.complete(&system_prompt, &repair_prompt).await {
                         Ok(retry_raw) => {
                             trace.timing.repair_llm_ms += repair_start.elapsed().as_millis() as u64;
                             match self.parse_plan(&retry_raw) {

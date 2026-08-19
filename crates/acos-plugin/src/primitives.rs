@@ -8,7 +8,7 @@ use acos_core::traits::{CapabilityDesc, Primitive};
 use acos_core::types::{EffectDecl, EffectKind, FailureClass};
 use acos_core::types::{TypedValue, ValueType};
 
-/// `search` 鈥?network read; returns an empty document list for MVP.
+/// `search` —network read; returns an empty document list for MVP.
 pub struct SearchPrimitive;
 
 impl std::fmt::Debug for SearchPrimitive {
@@ -52,7 +52,7 @@ impl Primitive for SearchPrimitive {
     }
 }
 
-/// `read_file` 鈥?filesystem read.
+/// `read_file` —filesystem read.
 pub struct ReadFilePrimitive;
 
 impl std::fmt::Debug for ReadFilePrimitive {
@@ -114,7 +114,7 @@ impl Primitive for ReadFilePrimitive {
     }
 }
 
-/// `write_file` 鈥?filesystem write (with delete compensation).
+/// `write_file` —filesystem write (with delete compensation).
 pub struct WriteFilePrimitive;
 
 impl std::fmt::Debug for WriteFilePrimitive {
@@ -192,7 +192,7 @@ impl Primitive for WriteFilePrimitive {
     }
 }
 
-/// `execute_python` 鈥?process execution of Python code (process spawn).
+/// `execute_python` —process execution of Python code (process spawn).
 pub struct ExecutePythonPrimitive;
 
 impl std::fmt::Debug for ExecutePythonPrimitive {
@@ -284,12 +284,12 @@ impl Primitive for ExecutePythonPrimitive {
     }
 }
 
-/// `csv.inspect_schema` 鈥?deterministic schema inspection for CSV files.
+/// `csv.inspect_schema` —deterministic schema inspection for CSV files.
 ///
 /// P1-5B v0.3 (Capability Contract & Typed Execution): a High-Level Cognitive
 /// Capability. The model writes structured parameters, not Python:
 /// `code: {"path": "${item}"}`. Returns a `{stdout, stderr}` envelope whose
-/// stdout is the JSON schema report 鈥?same envelope semantics as
+/// stdout is the JSON schema report —same envelope semantics as
 /// `execute_python`, so the Plan compiler is untouched.
 pub struct CsvInspectSchemaPrimitive;
 
@@ -370,13 +370,20 @@ impl Primitive for CsvInspectSchemaPrimitive {
     }
 }
 
-/// `csv.aggregate` 鈥?deterministic column aggregation with **runtime schema
+/// `csv.aggregate` —deterministic column aggregation with **runtime schema
 /// enforcement** (P1-5B v0.3 experiment C).
 ///
 /// Parameters: `code: {"path": "${item}", "columns": ["revenue", "units"]}`.
 /// Every referenced column is validated against the file's actual header; an
 /// unknown column is rejected with a `PrimitiveFailure` (the primitive
-/// enforces the schema 鈥?the model cannot silently hallucinate column names).
+/// enforces the schema —the model cannot silently hallucinate column names).
+///
+/// Canonical aggregation semantics: unquoted currency splits are merged
+/// (`$3` + `150.00` -> `$3,150.00`); rows with a literal `NULL` value in any
+/// column are dropped (N/A / empty cells are kept and sum as 0); fully
+/// duplicate rows (all columns) keep the first occurrence; remaining values
+/// are summed with negatives included. The result reports `row_count` (kept
+/// rows), `dropped_rows`, and per-column `sum`.
 pub struct CsvAggregatePrimitive;
 
 impl std::fmt::Debug for CsvAggregatePrimitive {
@@ -414,15 +421,12 @@ impl Primitive for CsvAggregatePrimitive {
                 primitive_id: Some("csv.aggregate".into()),
                 class: FailureClass::Unknown,
             })?;
-        let columns: Vec<String> = params
-            .get("columns")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let columns: Vec<String> = parse_columns(params.get("columns"))
+            .ok_or_else(|| AcosError::PrimitiveFailure {
+                message: "csv.aggregate requires a non-empty 'columns' array".into(),
+                primitive_id: Some("csv.aggregate".into()),
+                class: FailureClass::Unknown,
+            })?;
         if columns.is_empty() {
             return Err(AcosError::PrimitiveFailure {
                 message: "csv.aggregate requires a non-empty 'columns' array".into(),
@@ -447,23 +451,89 @@ impl Primitive for CsvAggregatePrimitive {
                 class: FailureClass::Unknown,
             });
         }
+        let idxs: Vec<usize> = columns
+            .iter()
+            .map(|c| header.iter().position(|h| h == c).unwrap_or(0))
+            .collect();
+        // Canonical deterministic aggregation semantics (mirrors the flagship
+        // benchmark's ground truth):
+        //   1. unquoted currency splits are merged (`$3` + `150.00` -> `$3,150.00`)
+        //   2. rows with a literal `NULL` value in ANY column are dropped
+        //      (N/A / empty cells are kept and sum as 0)
+        //   3. fully duplicate rows (all columns) keep the first occurrence
+        //   4. remaining values are summed; negatives included
+        let mut kept: Vec<Vec<String>> = Vec::new();
+        let mut seen: std::collections::HashSet<Vec<String>> = std::collections::HashSet::new();
+        let mut null_dropped = 0usize;
+        let mut dup_dropped = 0usize;
+        let mut currency_merges = 0usize;
+        let mut negative_values = false;
+        for raw in &rows {
+            let mut r: Vec<String> = Vec::with_capacity(raw.len());
+            let mut i = 0usize;
+            while i < raw.len() {
+                let c = raw[i].trim().to_string();
+                if c.starts_with('$')
+                    && i + 1 < raw.len()
+                    && raw[i + 1]
+                        .trim()
+                        .replace(['.', ','], "")
+                        .parse::<f64>()
+                        .is_ok()
+                {
+                    r.push(c + "," + raw[i + 1].trim());
+                    i += 2;
+                    currency_merges += 1;
+                } else {
+                    r.push(c);
+                    i += 1;
+                }
+            }
+            if r.iter().any(|v| v.to_uppercase() == "NULL") {
+                null_dropped += 1;
+                continue;
+            }
+            if seen.insert(r.clone()) {
+                kept.push(r);
+            } else {
+                dup_dropped += 1;
+            }
+        }
+        let mut issues: Vec<&str> = Vec::new();
+        if currency_merges > 0 {
+            issues.push("currency_formatting");
+        }
+        if null_dropped > 0 {
+            issues.push("missing_value_NULL");
+        }
+        if dup_dropped > 0 {
+            issues.push("duplicate_rows");
+        }
         let mut sums: Vec<serde_json::Value> = Vec::with_capacity(columns.len());
-        for col in &columns {
-            let idx = header.iter().position(|h| h == col).unwrap_or(0);
+        for (ci, col) in columns.iter().enumerate() {
             let mut sum = 0.0f64;
-            for r in &rows {
-                if let Some(v) = r.get(idx) {
+            for r in &kept {
+                if let Some(v) = r.get(idxs[ci]) {
                     sum += parse_number(v).unwrap_or(0.0);
+                    if parse_number(v).is_some_and(|n| n < 0.0) {
+                        negative_values = true;
+                    }
                 }
             }
             sums.push(serde_json::json!({ "name": col, "sum": sum }));
+        }
+        if negative_values {
+            issues.push("negative_values");
         }
         let result = serde_json::json!({
             "file": std::path::Path::new(path)
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or(path),
-            "row_count": rows.len(),
+            "row_count": kept.len(),
+            "dropped_rows": null_dropped + dup_dropped,
+            "currency_merges": currency_merges,
+            "issues": issues,
             "columns": sums,
         });
         Ok(envelope(&result))
@@ -478,25 +548,93 @@ impl Primitive for CsvAggregatePrimitive {
     }
 }
 
-/// Parses the structured parameter JSON carried in the `code` input.
+/// Extracts the referenced column names from a `columns` parameter.
+///
+/// Accepted shapes (all produced by the Plan IR / runtime):
+/// - a JSON array of strings: `["revenue", "units"]`;
+/// - a JSON array of objects: `[{"name": "revenue", "type": "number"}]`
+///   (directly taken from a `csv.inspect_schema` report);
+/// - a `csv.inspect_schema` envelope `{stdout: <report json>, stderr}` bound
+///   via `inputBindings` — the report's `columns` entries are used.
+fn parse_columns(v: Option<&Value>) -> Option<Vec<String>> {
+    let v = v?;
+    let names: Vec<String> = match v {
+        Value::Array(a) => a
+            .iter()
+            .filter_map(col_name)
+            .collect(),
+        Value::String(s) => serde_json::from_str::<Value>(s)
+            .ok()
+            .and_then(|x| x.as_array().cloned())
+            .map(|a| a.iter().filter_map(col_name).collect())
+            .unwrap_or_default(),
+        Value::Object(m) => m
+            .get("stdout")
+            .and_then(|s| s.as_str())
+            .and_then(|s| serde_json::from_str::<Value>(s).ok())
+            .and_then(|report| report.get("columns").and_then(|c| c.as_array().cloned()))
+            .map(|a| a.iter().filter_map(col_name).collect())
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    if names.is_empty() {
+        None
+    } else {
+        Some(names)
+    }
+}
+
+/// Column-name extractor: a string entry, or an object with a `name` field.
+fn col_name(e: &Value) -> Option<String> {
+    match e {
+        Value::String(s) => Some(s.clone()),
+        Value::Object(o) => o.get("name").and_then(|n| n.as_str()).map(|n| n.to_string()),
+        _ => None,
+    }
+}
+
+/// Parses the structured parameters for a CSV primitive.
+///
+/// Two shapes are accepted (both produced by the same Plan `code` JSON):
+/// - the parameters as a direct JSON object payload — the runtime's
+///   `resolve_value` auto-parses a JSON-parseable `code` string, so
+///   `{"path": "${item}"}` arrives already unwrapped;
+/// - the `{"code": "<json string>"}` wrapper (direct `Primitive::invoke`
+///   callers / unit tests).
 fn parse_params(input: &TypedValue) -> Result<serde_json::Map<String, Value>, AcosError> {
-    let code = input
-        .payload
-        .get("code")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| AcosError::PrimitiveFailure {
-            message: "csv primitive requires a 'code' parameter JSON string".into(),
-            primitive_id: Some("csv".into()),
-            class: FailureClass::Unknown,
-        })?;
-    serde_json::from_str::<Value>(code)
-        .ok()
-        .and_then(|v| v.as_object().cloned())
-        .ok_or_else(|| AcosError::PrimitiveFailure {
-            message: "csv primitive 'code' must be a JSON object of parameters".into(),
-            primitive_id: Some("csv".into()),
-            class: FailureClass::Unknown,
-        })
+    if let Some(obj) = input.payload.as_object() {
+        // The runtime's `resolve_value` parses a JSON-parseable `code` string
+        // into an object, so `{"code": {"path": ...}, ...}` is the common
+        // shape; the `code`-nested object holds the parameters. Sibling
+        // inputs (e.g. a `columns` inputBinding) are merged on top.
+        let mut params = serde_json::Map::new();
+        if let Some(code) = obj.get("code") {
+            let nested = match code {
+                Value::Object(o) => Some(o.clone()),
+                Value::String(s) => serde_json::from_str::<Value>(s)
+                    .ok()
+                    .and_then(|v| v.as_object().cloned()),
+                _ => None,
+            };
+            if let Some(n) = nested {
+                params = n;
+            }
+        }
+        for (k, v) in obj {
+            if k != "code" {
+                params.insert(k.clone(), v.clone());
+            }
+        }
+        // Direct-object form (no `code` key): the payload itself is the params.
+        if params.contains_key("path") || params.contains_key("columns") {
+            return Ok(params);
+        }
+    }
+    Err(AcosError::PrimitiveFailure {
+        message: "csv primitive requires parameters (a JSON object with 'path')".into(),
+        primitive_id: Some("csv".into()),
+        class: FailureClass::Unknown,
+    })
 }
 
 /// Wraps a value in the `{stdout, stderr}` envelope (runtime envelope
@@ -570,7 +708,7 @@ fn is_missing(v: &str) -> bool {
     )
 }
 
-/// `summarize` 鈥?text summarization backed by Claude (via LongCat).
+/// `summarize` —text summarization backed by Claude (via LongCat).
 ///
 /// When the `LONGCAT_API_KEY` (or `ANTHROPIC_API_KEY`) environment variable is
 /// set, this primitive sends the document to Claude and returns a real

@@ -55,6 +55,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(1);
     let plan_mode = args.iter().any(|a| a == "--plan");
+    let csv_mode = match get_arg(&args, "--csv-mode").as_deref() {
+        Some("observe") => acos_compiler::CsvMode::Observe,
+        Some("enforce") | None => acos_compiler::CsvMode::Enforce,
+        Some(other) => {
+            eprintln!("unknown --csv-mode '{other}' (expected 'observe' or 'enforce')");
+            std::process::exit(2);
+        }
+    };
 
     if let Err(e) = try_load_env() {
         eprintln!("[warn] .env not loaded: {e}");
@@ -83,8 +91,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let run_start = Instant::now();
         println!("── Run {run_idx}/{runs} ──");
 
-        let compiler = ModelCompiler::from_env()
+        let mut compiler = ModelCompiler::from_env()
             .map_err(|e| format!("ModelCompiler::from_env failed (set LONGCAT_API_KEY?): {e}"))?;
+        compiler.set_csv_mode(csv_mode);
         let traced = if plan_mode {
             compiler.compile_plan_traced(&task_spec, MAX_REPAIR_ATTEMPTS).await
         } else {

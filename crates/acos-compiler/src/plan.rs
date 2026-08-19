@@ -185,6 +185,17 @@ pub struct RetrySpec {
 /// strings are human-readable so they can be fed back to the LLM in a repair
 /// round (they are also printed verbatim in the trace).
 pub fn validate_plan(plan: &PlanIR) -> Result<(), String> {
+    validate_plan_with_allowlist(plan, super::ALLOWED_CAPABILITIES)
+}
+
+/// Validates a plan against a mode-specific capability allowlist.
+///
+/// P1-5B v0.3: experiment B (Observe) excludes `csv.aggregate`, experiment C
+/// (Enforce) allows it. Default [`validate_plan`] uses the full allowlist.
+pub fn validate_plan_with_allowlist(
+    plan: &PlanIR,
+    allowlist: &[&str],
+) -> Result<(), String> {
     if plan.goal.trim().is_empty() {
         return Err("plan.goal must not be empty".into());
     }
@@ -197,7 +208,7 @@ pub fn validate_plan(plan: &PlanIR) -> Result<(), String> {
     // Names must be globally unique and identifier-shaped (they become node ids).
     let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
     for step in &plan.steps {
-        validate_step(step, &mut seen_names, &mut declared, None)?;
+        validate_step(step, &mut seen_names, allowlist, &mut declared, None)?;
     }
 
     validate_data_flow(plan, &declared)?;
@@ -214,6 +225,7 @@ pub fn validate_plan(plan: &PlanIR) -> Result<(), String> {
 fn validate_step(
     step: &PlanStep,
     seen_names: &mut std::collections::HashSet<String>,
+    allowlist: &[&str],
     declared: &mut std::collections::HashMap<String, StepOutput>,
     scope: Option<&std::collections::HashMap<String, StepOutput>>,
 ) -> Result<(), String> {
@@ -245,11 +257,11 @@ fn validate_step(
             let cap = step.capability.as_deref().ok_or_else(|| {
                 format!("step '{}': primitive/retry steps require a capability", step.name)
             })?;
-            if !super::ALLOWED_CAPABILITIES.contains(&cap) {
+            if !allowlist.contains(&cap) {
                 return Err(format!(
                     "step '{}': capability '{cap}' is not in the allowed set {}",
                     step.name,
-                    super::ALLOWED_CAPABILITIES.join(", ")
+                    allowlist.join(", ")
                 ));
             }
             if cap == "write_file" {
@@ -310,7 +322,7 @@ fn validate_step(
             );
             let mut body_declared: std::collections::HashMap<String, StepOutput> = std::collections::HashMap::new();
             for body_step in &step.body {
-                validate_step(body_step, seen_names, &mut body_declared, Some(&body_scope))?;
+                validate_step(body_step, seen_names, allowlist, &mut body_declared, Some(&body_scope))?;
             }
             // Loop aggregate output must be List<last body output>.
             if let Some(out) = &step.output {
@@ -350,7 +362,7 @@ fn validate_step(
             }
             let mut body_declared: std::collections::HashMap<String, StepOutput> = std::collections::HashMap::new();
             for body_step in &step.body {
-                validate_step(body_step, seen_names, &mut body_declared, Some(&visible))?;
+                validate_step(body_step, seen_names, allowlist, &mut body_declared, Some(&visible))?;
             }
             if step.output.is_some() {
                 return Err(format!(
@@ -1226,6 +1238,24 @@ mod tests {
         };
         let err = validate_plan(&plan).unwrap_err();
         assert!(err.contains("reserved"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn observe_mode_excludes_aggregate_but_enforce_allows_it() {
+        let mut plan = PlanIR {
+            goal: "x".into(),
+            steps: vec![step("agg", StepKind::Primitive)],
+            data_flow: vec![],
+            control_flow: vec![],
+        };
+        plan.steps[0].capability = Some("csv.aggregate".into());
+        plan.steps[0].code = Some(r#"{"path": "${item}", "columns": ["revenue"]}"#.into());
+        // Experiment B (Observe): csv.aggregate is NOT available.
+        let err = validate_plan_with_allowlist(&plan, crate::ALLOWED_CAPABILITIES_OBSERVE)
+            .unwrap_err();
+        assert!(err.contains("not in the allowed set"), "unexpected error: {err}");
+        // Experiment C (Enforce) / default: allowed.
+        assert!(validate_plan(&plan).is_ok());
     }
 
     #[test]
