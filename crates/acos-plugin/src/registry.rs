@@ -8,18 +8,18 @@ use acos_core::error::AcosError;
 use acos_core::id::PrimitiveId;
 use acos_core::traits::{CapabilityDesc, PluginRegistry, Primitive, PrimitiveManifest};
 use crate::primitives::{
-    ExecutePythonPrimitive, ReadFilePrimitive, SearchPrimitive, SummarizePrimitive,
-    WriteFilePrimitive,
+    CsvAggregatePrimitive, CsvInspectSchemaPrimitive, ExecutePythonPrimitive, ReadFilePrimitive,
+    SearchPrimitive, SummarizePrimitive, WriteFilePrimitive,
 };
 
-/// A registry preloaded with the five built-in MVP primitives.
+/// A registry preloaded with the built-in MVP primitives.
 #[derive(Debug, Clone)]
 pub struct BuiltinRegistry {
     capabilities: Vec<CapabilityDesc>,
 }
 
 impl BuiltinRegistry {
-    /// Creates a registry with all five built-in primitives registered.
+    /// Creates a registry with all built-in primitives registered.
     pub fn new() -> Self {
         // SummarizePrimitive now carries an optional LLM client, so build an
         // instance to read its capability descriptor.
@@ -29,6 +29,8 @@ impl BuiltinRegistry {
             ReadFilePrimitive.capability(),
             WriteFilePrimitive.capability(),
             ExecutePythonPrimitive.capability(),
+            CsvInspectSchemaPrimitive.capability(),
+            CsvAggregatePrimitive.capability(),
             summarize.capability(),
         ];
         Self { capabilities }
@@ -53,6 +55,8 @@ impl PluginRegistry for BuiltinRegistry {
             "read_file" => Ok(Box::new(ReadFilePrimitive)),
             "write_file" => Ok(Box::new(WriteFilePrimitive)),
             "execute_python" => Ok(Box::new(ExecutePythonPrimitive)),
+            "csv.inspect_schema" => Ok(Box::new(CsvInspectSchemaPrimitive)),
+            "csv.aggregate" => Ok(Box::new(CsvAggregatePrimitive)),
             "summarize" => Ok(Box::new(SummarizePrimitive::new())),
             other => Err(AcosError::ValidationFailure {
                 message: format!("unknown primitive capability: {other}"),
@@ -85,7 +89,7 @@ mod tests {
         std::env::remove_var("LONGCAT_API_KEY");
         std::env::remove_var("ANTHROPIC_API_KEY");
         let reg = BuiltinRegistry::new();
-        assert_eq!(reg.list().len(), 5);
+        assert_eq!(reg.list().len(), 7);
 
         let summarize = reg.resolve("summarize").await.unwrap();
         let input = acos_core::types::TypedValue {

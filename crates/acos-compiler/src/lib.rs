@@ -193,6 +193,9 @@ const ALLOWED_CAPABILITIES: &[&str] = &[
     "write_file",
     "execute_python",
     "summarize",
+    // CSV capabilities (P1-5B v0.3: Capability Contract & Typed Execution)
+    "csv.inspect_schema",
+    "csv.aggregate",
     // Bench stubs
     "flaky_search",
     "list_source",
@@ -322,8 +325,22 @@ Each step is a JSON object with a `kind` from the following table:
 Common fields:
 - `name`: unique identifier (letters, digits, underscore; must not start with a digit).
 - `description`: one sentence about what the step does (optional).
-- `capability`: one of `search`, `read_file`, `write_file`, `execute_python`, `summarize`.
+- `capability`: one of `search`, `read_file`, `write_file`, `execute_python`, `summarize`, `csv.inspect_schema`, `csv.aggregate`.
 - `code`: Python code for `execute_python` steps. It may reference values produced by earlier steps as `${outputName}` (and `${item}` inside a foreach body). The code runs inside the ACOS sandbox with a populated `env`; return values via `env["name"] = value` or plain variable assignment.
+
+# CSV capabilities (structured operations — no Python)
+
+For CSV data, prefer these over `execute_python` — they are deterministic and
+schema-aware:
+
+- `csv.inspect_schema`: parameters `code: {"path": "${item}"}` (or an earlier
+  binding). Returns a report of `columns` (name + inferred type), `row_count`,
+  and `issues`. Inspect a file FIRST, then reference only the columns it
+  reports.
+- `csv.aggregate`: parameters `code: {"path": ..., "columns": ["col_a", ...]}`.
+  Sums the referenced columns (missing values count as 0). **Unknown column
+  names are rejected at runtime** — only use columns reported by
+  `csv.inspect_schema`.
 - `inputBindings`: array of `{ "param": <name>, "source": <step name>, "binding": <output name> }` — bind a previous step's output to a parameter.
 - `output`: `{ "name": <unique identifier>, "typeName": <type>, "fields": [ { "name": ..., "typeName": "Number"|"Integer"|"String"|"Boolean"|"List"|"Record"|"Any" } ] }`. `typeName` must be non-empty; use `List<X>` for lists of `X`. `fields` documents record schemas (may be empty).
 - `retry` (retry steps only): `{ "maxAttempts": <>= 2> }`.

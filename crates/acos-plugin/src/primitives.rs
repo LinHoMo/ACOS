@@ -1,4 +1,4 @@
-//! The five built-in MVP cognitive primitives.
+﻿//! The five built-in MVP cognitive primitives.
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -8,7 +8,7 @@ use acos_core::traits::{CapabilityDesc, Primitive};
 use acos_core::types::{EffectDecl, EffectKind, FailureClass};
 use acos_core::types::{TypedValue, ValueType};
 
-/// `search` — network read; returns an empty document list for MVP.
+/// `search` 鈥?network read; returns an empty document list for MVP.
 pub struct SearchPrimitive;
 
 impl std::fmt::Debug for SearchPrimitive {
@@ -52,7 +52,7 @@ impl Primitive for SearchPrimitive {
     }
 }
 
-/// `read_file` — filesystem read.
+/// `read_file` 鈥?filesystem read.
 pub struct ReadFilePrimitive;
 
 impl std::fmt::Debug for ReadFilePrimitive {
@@ -114,7 +114,7 @@ impl Primitive for ReadFilePrimitive {
     }
 }
 
-/// `write_file` — filesystem write (with delete compensation).
+/// `write_file` 鈥?filesystem write (with delete compensation).
 pub struct WriteFilePrimitive;
 
 impl std::fmt::Debug for WriteFilePrimitive {
@@ -192,7 +192,7 @@ impl Primitive for WriteFilePrimitive {
     }
 }
 
-/// `execute_python` — process execution of Python code (process spawn).
+/// `execute_python` 鈥?process execution of Python code (process spawn).
 pub struct ExecutePythonPrimitive;
 
 impl std::fmt::Debug for ExecutePythonPrimitive {
@@ -284,7 +284,293 @@ impl Primitive for ExecutePythonPrimitive {
     }
 }
 
-/// `summarize` — text summarization backed by Claude (via LongCat).
+/// `csv.inspect_schema` 鈥?deterministic schema inspection for CSV files.
+///
+/// P1-5B v0.3 (Capability Contract & Typed Execution): a High-Level Cognitive
+/// Capability. The model writes structured parameters, not Python:
+/// `code: {"path": "${item}"}`. Returns a `{stdout, stderr}` envelope whose
+/// stdout is the JSON schema report 鈥?same envelope semantics as
+/// `execute_python`, so the Plan compiler is untouched.
+pub struct CsvInspectSchemaPrimitive;
+
+impl std::fmt::Debug for CsvInspectSchemaPrimitive {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "CsvInspectSchemaPrimitive")
+    }
+}
+
+#[async_trait]
+impl Primitive for CsvInspectSchemaPrimitive {
+    fn capability(&self) -> CapabilityDesc {
+        CapabilityDesc {
+            id: "csv.inspect_schema".into(),
+            name: "CSV Inspect Schema".into(),
+            input_type: "CsvInspectRequest".into(),
+            output_type: "CsvSchemaReport".into(),
+        }
+    }
+
+    fn effects(&self) -> Vec<EffectDecl> {
+        vec![EffectDecl {
+            kind: EffectKind::FsRead,
+            description: "read CSV file".into(),
+            reversible: true,
+        }]
+    }
+
+    async fn invoke(&self, input: TypedValue) -> Result<TypedValue, AcosError> {
+        let params = parse_params(&input)?;
+        let path = params
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| AcosError::PrimitiveFailure {
+                message: "csv.inspect_schema requires a 'path' string".into(),
+                primitive_id: Some("csv.inspect_schema".into()),
+                class: FailureClass::Unknown,
+            })?;
+        let (header, rows) = read_csv(path).await?;
+        let row_count = rows.len();
+        let ncols = header.len();
+        let mut column_types: Vec<serde_json::Value> = Vec::with_capacity(ncols);
+        for (i, name) in header.iter().enumerate() {
+            let col: Vec<&str> = rows
+                .iter()
+                .filter_map(|r| r.get(i).map(|v| v.as_str()))
+                .collect();
+            let ty = if !col.is_empty() && col.iter().all(|v| v.parse::<i64>().is_ok()) {
+                "integer"
+            } else if !col.is_empty() && col.iter().all(|v| parse_number(v).is_some()) {
+                "number"
+            } else {
+                "string"
+            };
+            column_types.push(serde_json::json!({ "name": name, "type": ty }));
+        }
+        let mut issues: Vec<&str> = Vec::new();
+        if rows.iter().any(|r| r.len() != ncols) {
+            issues.push("field_count_mismatch");
+        }
+        if rows.iter().flatten().any(|v| is_missing(v)) {
+            issues.push("missing_value");
+        }
+        let report = serde_json::json!({
+            "columns": column_types,
+            "row_count": row_count,
+            "issues": issues,
+        });
+        Ok(envelope(&report))
+    }
+
+    fn has_compensation(&self, _effect: &EffectDecl) -> bool {
+        false
+    }
+
+    async fn compensate(&self, _effect: &EffectDecl, _input: TypedValue) -> Result<(), AcosError> {
+        Ok(())
+    }
+}
+
+/// `csv.aggregate` 鈥?deterministic column aggregation with **runtime schema
+/// enforcement** (P1-5B v0.3 experiment C).
+///
+/// Parameters: `code: {"path": "${item}", "columns": ["revenue", "units"]}`.
+/// Every referenced column is validated against the file's actual header; an
+/// unknown column is rejected with a `PrimitiveFailure` (the primitive
+/// enforces the schema 鈥?the model cannot silently hallucinate column names).
+pub struct CsvAggregatePrimitive;
+
+impl std::fmt::Debug for CsvAggregatePrimitive {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "CsvAggregatePrimitive")
+    }
+}
+
+#[async_trait]
+impl Primitive for CsvAggregatePrimitive {
+    fn capability(&self) -> CapabilityDesc {
+        CapabilityDesc {
+            id: "csv.aggregate".into(),
+            name: "CSV Aggregate".into(),
+            input_type: "CsvAggregateRequest".into(),
+            output_type: "CsvAggregateResult".into(),
+        }
+    }
+
+    fn effects(&self) -> Vec<EffectDecl> {
+        vec![EffectDecl {
+            kind: EffectKind::FsRead,
+            description: "read CSV file".into(),
+            reversible: true,
+        }]
+    }
+
+    async fn invoke(&self, input: TypedValue) -> Result<TypedValue, AcosError> {
+        let params = parse_params(&input)?;
+        let path = params
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| AcosError::PrimitiveFailure {
+                message: "csv.aggregate requires a 'path' string".into(),
+                primitive_id: Some("csv.aggregate".into()),
+                class: FailureClass::Unknown,
+            })?;
+        let columns: Vec<String> = params
+            .get("columns")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if columns.is_empty() {
+            return Err(AcosError::PrimitiveFailure {
+                message: "csv.aggregate requires a non-empty 'columns' array".into(),
+                primitive_id: Some("csv.aggregate".into()),
+                class: FailureClass::Unknown,
+            });
+        }
+        let (header, rows) = read_csv(path).await?;
+        // Runtime schema enforcement: reject unknown column references.
+        let missing: Vec<&str> = columns
+            .iter()
+            .map(|c| c.as_str())
+            .filter(|c| !header.iter().any(|h| h == *c))
+            .collect();
+        if !missing.is_empty() {
+            return Err(AcosError::PrimitiveFailure {
+                message: format!(
+                    "csv.aggregate: unknown column(s) {:?}; actual header is {:?}",
+                    missing, header
+                ),
+                primitive_id: Some("csv.aggregate".into()),
+                class: FailureClass::Unknown,
+            });
+        }
+        let mut sums: Vec<serde_json::Value> = Vec::with_capacity(columns.len());
+        for col in &columns {
+            let idx = header.iter().position(|h| h == col).unwrap_or(0);
+            let mut sum = 0.0f64;
+            for r in &rows {
+                if let Some(v) = r.get(idx) {
+                    sum += parse_number(v).unwrap_or(0.0);
+                }
+            }
+            sums.push(serde_json::json!({ "name": col, "sum": sum }));
+        }
+        let result = serde_json::json!({
+            "file": std::path::Path::new(path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(path),
+            "row_count": rows.len(),
+            "columns": sums,
+        });
+        Ok(envelope(&result))
+    }
+
+    fn has_compensation(&self, _effect: &EffectDecl) -> bool {
+        false
+    }
+
+    async fn compensate(&self, _effect: &EffectDecl, _input: TypedValue) -> Result<(), AcosError> {
+        Ok(())
+    }
+}
+
+/// Parses the structured parameter JSON carried in the `code` input.
+fn parse_params(input: &TypedValue) -> Result<serde_json::Map<String, Value>, AcosError> {
+    let code = input
+        .payload
+        .get("code")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AcosError::PrimitiveFailure {
+            message: "csv primitive requires a 'code' parameter JSON string".into(),
+            primitive_id: Some("csv".into()),
+            class: FailureClass::Unknown,
+        })?;
+    serde_json::from_str::<Value>(code)
+        .ok()
+        .and_then(|v| v.as_object().cloned())
+        .ok_or_else(|| AcosError::PrimitiveFailure {
+            message: "csv primitive 'code' must be a JSON object of parameters".into(),
+            primitive_id: Some("csv".into()),
+            class: FailureClass::Unknown,
+        })
+}
+
+/// Wraps a value in the `{stdout, stderr}` envelope (runtime envelope
+/// semantics shared with `execute_python`).
+fn envelope(value: &Value) -> TypedValue {
+    TypedValue {
+        value_type: ValueType::Scalar,
+        payload: serde_json::json!({
+            "stdout": serde_json::to_string(value).unwrap_or_default(),
+            "stderr": "",
+        }),
+    }
+}
+
+/// Reads a CSV file (utf-8-sig) into (header, rows) of raw cell strings.
+/// Minimal quote-aware parsing: `"` toggles quoting; commas inside quotes are
+/// kept; a field may contain a quoted comma (e.g. `"$1,200"`).
+async fn read_csv(path: &str) -> Result<(Vec<String>, Vec<Vec<String>>), AcosError> {
+    let raw = tokio::fs::read_to_string(path)
+        .await
+        .map_err(|e| AcosError::PrimitiveFailure {
+            message: format!("failed to read {path}: {e}"),
+            primitive_id: Some("csv".into()),
+            class: FailureClass::Unknown,
+        })?;
+    let text = raw.strip_prefix('\u{feff}').unwrap_or(&raw);
+    let mut lines = text.lines();
+    let header = parse_csv_line(lines.next().unwrap_or(""));
+    let rows: Vec<Vec<String>> = lines
+        .filter(|l| !l.trim().is_empty())
+        .map(parse_csv_line)
+        .collect();
+    Ok((header, rows))
+}
+
+/// Parses one CSV line into fields, honoring double-quoted segments.
+fn parse_csv_line(line: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut cur = String::new();
+    let mut in_quotes = false;
+    for c in line.chars() {
+        match c {
+            '"' => in_quotes = !in_quotes,
+            ',' if !in_quotes => {
+                fields.push(cur.trim().to_string());
+                cur = String::new();
+            }
+            _ => cur.push(c),
+        }
+    }
+    fields.push(cur.trim().to_string());
+    fields
+}
+
+/// Loose numeric parse: strips `$` and thousands separators, treats MISSING
+/// sentinels as `None`.
+fn parse_number(v: &str) -> Option<f64> {
+    let s = v.trim();
+    if is_missing(s) {
+        return None;
+    }
+    let cleaned = s.replace(['$', ','], "");
+    cleaned.parse::<f64>().ok()
+}
+
+/// MISSING-value sentinels (mirrors the flagship benchmark's semantics).
+fn is_missing(v: &str) -> bool {
+    matches!(
+        v.trim(),
+        "" | "NA" | "N/A" | "NULL" | "null" | "nan" | "-"
+    )
+}
+
+/// `summarize` 鈥?text summarization backed by Claude (via LongCat).
 ///
 /// When the `LONGCAT_API_KEY` (or `ANTHROPIC_API_KEY`) environment variable is
 /// set, this primitive sends the document to Claude and returns a real
@@ -358,7 +644,7 @@ impl Primitive for SummarizePrimitive {
 /// Calls Claude to produce a concise summary of the given text.
 async fn llm_summarize(llm: &acos_llm::LongCatClient, text: &str) -> Result<String, AcosError> {
     let system = "You are a concise summarizer. Produce a clear, accurate summary of the given text in Chinese. Be specific; do not invent facts. Keep it to 2-4 sentences unless the input is long.";
-    let user = format!("请总结以下文本：\n\n{text}");
+    let user = format!("璇锋€荤粨浠ヤ笅鏂囨湰锛歕n\n{text}");
     llm.complete(system, &user).await
 }
 
@@ -406,11 +692,88 @@ fn which(cmd: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::AsyncWriteExt;
 
     #[test]
     fn summarize_counts_lines_and_chars() {
         let s = summarize_text("alpha\nbeta\ngamma\n");
         assert!(s.contains("3 lines"));
         assert!(s.contains("alpha"));
+    }
+
+    fn input_with_code(code: &str) -> TypedValue {
+        TypedValue {
+            value_type: ValueType::Scalar,
+            payload: serde_json::json!({ "code": code }),
+        }
+    }
+
+    #[tokio::test]
+    async fn csv_inspect_schema_reports_columns_types_and_issues() {
+        let dir = std::env::temp_dir().join("acos-csv-test");
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let path = dir.join("sales_q1.csv");
+        let mut f = tokio::fs::File::create(&path).await.unwrap();
+        f.write_all(b"date,product,units,revenue\na,1,5,100\nb,2,,\"1,200\"\n")
+            .await
+            .unwrap();
+
+        let out = CsvInspectSchemaPrimitive
+            .invoke(input_with_code(
+                &serde_json::json!({ "path": path.display().to_string() }).to_string(),
+            ))
+            .await
+            .unwrap();
+        let stdout = out.payload.get("stdout").unwrap().as_str().unwrap();
+        let report: Value = serde_json::from_str(stdout).unwrap();
+        let cols = report["columns"].as_array().unwrap();
+        assert_eq!(cols.len(), 4);
+        assert_eq!(cols[3]["name"], "revenue");
+        assert_eq!(cols[1]["type"], "integer");
+        assert_eq!(cols[3]["type"], "number");
+        assert!(report["issues"].as_array().unwrap().contains(&Value::String("missing_value".into())));
+        tokio::fs::remove_dir_all(&dir).await.ok();
+    }
+
+    #[tokio::test]
+    async fn csv_aggregate_sums_columns_and_rejects_unknown_columns() {
+        let dir = std::env::temp_dir().join("acos-csv-agg");
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let path = dir.join("sales_q2.csv");
+        let mut f = tokio::fs::File::create(&path).await.unwrap();
+        f.write_all(b"product,units,revenue\nx,10,\"$1,200\"\ny,5,300\n")
+            .await
+            .unwrap();
+
+        let out = CsvAggregatePrimitive
+            .invoke(input_with_code(
+                &serde_json::json!({
+                    "path": path.display().to_string(),
+                    "columns": ["revenue", "units"]
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+        let stdout = out.payload.get("stdout").unwrap().as_str().unwrap();
+        let result: Value = serde_json::from_str(stdout).unwrap();
+        let cols = result["columns"].as_array().unwrap();
+        assert_eq!(cols[0]["name"], "revenue");
+        assert_eq!(cols[0]["sum"], 1500.0);
+        assert_eq!(cols[1]["sum"], 15.0);
+
+        // Runtime schema enforcement: unknown column -> PrimitiveFailure.
+        let err = CsvAggregatePrimitive
+            .invoke(input_with_code(
+                &serde_json::json!({
+                    "path": path.display().to_string(),
+                    "columns": ["quantity"]
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("unknown column"), "got: {err}");
+        tokio::fs::remove_dir_all(&dir).await.ok();
     }
 }
