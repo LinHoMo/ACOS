@@ -1,0 +1,740 @@
+{
+  "behavioral_analysis": {
+    "binding_matched": 4,
+    "binding_total": 4,
+    "checks": [
+      {
+        "detail": "4/4 declared paths referenced",
+        "name": "BR-1 Multi-File Processing",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "analysis caps: {\"execute_python\", \"csv.inspect_schema\"}",
+        "name": "BR-2 Data Quality Analysis",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "conditions=0, python=true",
+        "name": "BR-3 Anomaly Detection/Repair",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "no output",
+        "name": "BR-4 Structured Report",
+        "verdict": "FAIL"
+      },
+      {
+        "detail": "11 nodes, 9 primitives",
+        "name": "BR-5 Evidence/Audit Trail",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "1 loops, 0 conds, 0 retries",
+        "name": "BR-6 Control Flow Complexity",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "all paths declared",
+        "name": "BR-7 No Hallucinated Resources",
+        "verdict": "PASS"
+      }
+    ],
+    "condition_count": 0,
+    "loop_count": 1,
+    "node_count": 11,
+    "pass_count": 6,
+    "primitive_count": 9,
+    "retry_count": 0
+  },
+  "contract": {
+    "error": null,
+    "pass": true
+  },
+  "execution": {
+    "error": "primitive failure: python exited Some(1): Traceback (most recent call last):\r\n  File \"<string>\", line 18, in <module>\r\nNameError: name 'env' is not defined\r\n (primitive=Some(\"execute_python\"), class=Unknown)",
+    "ok": false
+  },
+  "input": {
+    "prompt_sent": "Produce an execution plan for the following ACOS task.\n\n# Task Goal\n\nAnalyze all quarterly sales CSV files in the dataset directory. For each file: detect data-quality issues (schema drift, type errors, missing values, duplicates, outliers); repair recoverable issues; revalidate repaired inputs; compute quarterly statistics; merge results; run a quality review; and generate a consolidated Markdown report with an evidence log.\n\n# Declared Inputs (for awareness only)\n\nThe task declares these input files; your plan MUST NOT embed any path — use `\"over\": \"inputs\"` for per-file processing:\n\n1. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv\", format=\"csv\"\n2. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv\", format=\"csv\"\n3. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv\", format=\"csv\"\n4. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv\", format=\"csv\"\n\n# Required Outputs\n\nThe plan MUST produce:\n\n- type=\"Report\", format=\"markdown\"\n\n# Constraints\n\n\n# Instructions\n\nThink through the task's required operations (detection, repair, validation, aggregation, reporting) and express them as plan steps. Return ONLY the plan JSON.",
+    "task_spec_path": "tests/benchmarks/p1/flagship_csv_quality/acos_task.yaml"
+  },
+  "output": {
+    "final_cir": {
+      "effects": [],
+      "entry": [
+        "plan_root"
+      ],
+      "id": "0dcb472a-eda6-422c-a0da-43102840cca0",
+      "nodes": [
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import json\nprint(json.dumps([\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv\",\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv\",\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv\",\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv\"]))\n"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "task_inputs",
+          "output": {
+            "fields": [],
+            "name": "input_files",
+            "typeName": "List<String>"
+          }
+        },
+        {
+          "capability": "csv.inspect_schema",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "{\"path\": \"${item}\"}"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "inspect_schema",
+          "output": {
+            "fields": [
+              {
+                "name": "columns",
+                "typeName": "List<Record>"
+              },
+              {
+                "name": "row_count",
+                "typeName": "Integer"
+              },
+              {
+                "name": "issues",
+                "typeName": "List<String>"
+              }
+            ],
+            "name": "schema_report",
+            "typeName": "Record"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import pandas as pd\ndf = pd.read_csv('${item}')\nissues = []\nmissing = df.isnull().sum()\nfor col, count in missing.items():\n    if count > 0:\n        issues.append(f'{col}: {count} missing values')\ndupes = df.duplicated().sum()\nif dupes > 0:\n    issues.append(f'{dupes} duplicate rows')\nfor col in df.select_dtypes(include='number').columns:\n    q1 = df[col].quantile(0.25)\n    q3 = df[col].quantile(0.75)\n    iqr = q3 - q1\n    outliers = ((df[col] < q1 - 1.5*iqr) | (df[col] > q3 + 1.5*iqr)).sum()\n    if outliers > 0:\n        issues.append(f'{col}: {outliers} outliers')\nenv['issues_report'] = {'file': '${item}', 'issues': issues, 'row_count': len(df), 'columns': list(df.columns)}"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "detect_issues",
+          "output": {
+            "fields": [
+              {
+                "name": "file",
+                "typeName": "String"
+              },
+              {
+                "name": "issues",
+                "typeName": "List<String>"
+              },
+              {
+                "name": "row_count",
+                "typeName": "Integer"
+              },
+              {
+                "name": "columns",
+                "typeName": "List<String>"
+              }
+            ],
+            "name": "issues_report",
+            "typeName": "Record"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import pandas as pd\ndf = pd.read_csv('${item}')\nrepairs = []\nbefore = len(df)\ndf = df.drop_duplicates()\nif len(df) < before:\n    repairs.append(f'Removed {before - len(df)} duplicate rows')\nfor col in df.select_dtypes(include='number').columns:\n    if df[col].isnull().any():\n        median = df[col].median()\n        count = df[col].isnull().sum()\n        df[col] = df[col].fillna(median)\n        repairs.append(f'Filled {count} missing in {col} with median {median}')\nfor col in df.select_dtypes(include='object').columns:\n    if df[col].isnull().any():\n        mode = df[col].mode()[0]\n        count = df[col].isnull().sum()\n        df[col] = df[col].fillna(mode)\n        repairs.append(f'Filled {count} missing in {col} with mode {mode}')\nenv['repaired_data'] = {'file': '${item}', 'dataframe': df.to_dict('records'), 'repairs': repairs, 'row_count': len(df)}"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "repair_issues",
+          "output": {
+            "fields": [
+              {
+                "name": "file",
+                "typeName": "String"
+              },
+              {
+                "name": "dataframe",
+                "typeName": "List<Record>"
+              },
+              {
+                "name": "repairs",
+                "typeName": "List<String>"
+              },
+              {
+                "name": "row_count",
+                "typeName": "Integer"
+              }
+            ],
+            "name": "repaired_data",
+            "typeName": "Record"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputTypes": {
+            "repaired_data": "Record"
+          },
+          "inputs": {
+            "code": "import pandas as pd\ndf = pd.DataFrame(${repaired_data}['dataframe'])\nvalidation = []\nmissing = df.isnull().sum().sum()\nif missing == 0:\n    validation.append('No missing values remain')\nelse:\n    validation.append(f'{missing} missing values still present')\ndupes = df.duplicated().sum()\nif dupes == 0:\n    validation.append('No duplicate rows remain')\nelse:\n    validation.append(f'{dupes} duplicate rows still present')\nenv['validation_report'] = {'file': '${item}', 'validation': validation, 'is_clean': missing == 0 and dupes == 0}",
+            "repaired_data": "${repaired_data}"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "revalidate",
+          "output": {
+            "fields": [
+              {
+                "name": "file",
+                "typeName": "String"
+              },
+              {
+                "name": "validation",
+                "typeName": "List<String>"
+              },
+              {
+                "name": "is_clean",
+                "typeName": "Boolean"
+              }
+            ],
+            "name": "validation_report",
+            "typeName": "Record"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputTypes": {
+            "repaired_data": "Record"
+          },
+          "inputs": {
+            "code": "import pandas as pd\ndf = pd.DataFrame(${repaired_data}['dataframe'])\nstats = {'file': '${item}', 'row_count': len(df), 'column_stats': {}}\nfor col in df.select_dtypes(include='number').columns:\n    stats['column_stats'][col] = {'mean': float(df[col].mean()), 'median': float(df[col].median()), 'std': float(df[col].std()), 'min': float(df[col].min()), 'max': float(df[col].max()), 'sum': float(df[col].sum())}\nfor col in df.select_dtypes(include='object').columns:\n    stats['column_stats'][col] = {'unique_count': int(df[col].nunique()), 'most_common': str(df[col].value_counts().index[0]) if len(df[col].value_counts()) > 0 else ''}\nenv['quarterly_stats'] = stats",
+            "repaired_data": "${repaired_data}"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "compute_stats",
+          "output": {
+            "fields": [
+              {
+                "name": "file",
+                "typeName": "String"
+              },
+              {
+                "name": "row_count",
+                "typeName": "Integer"
+              },
+              {
+                "name": "column_stats",
+                "typeName": "Record"
+              }
+            ],
+            "name": "quarterly_stats",
+            "typeName": "Record"
+          }
+        },
+        {
+          "capability": null,
+          "children": [
+            "inspect_schema",
+            "detect_issues",
+            "repair_issues",
+            "revalidate",
+            "compute_stats"
+          ],
+          "control": {
+            "loopSpec": {
+              "condition": null,
+              "input": "${input_files}",
+              "itemVar": "item",
+              "kind": "for_each",
+              "maxIterations": null
+            }
+          },
+          "elseChildren": [],
+          "inputs": {},
+          "kind": "loop_map",
+          "nodeId": "process_files",
+          "output": {
+            "fields": [
+              {
+                "name": "file",
+                "typeName": "String"
+              },
+              {
+                "name": "row_count",
+                "typeName": "Integer"
+              },
+              {
+                "name": "column_stats",
+                "typeName": "Record"
+              }
+            ],
+            "name": "all_quarterly_stats",
+            "typeName": "List<Record>"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputTypes": {
+            "all_quarterly_stats": "List<Record>"
+          },
+          "inputs": {
+            "all_quarterly_stats": "${all_quarterly_stats}",
+            "code": "merged = {'quarters': [], 'total_rows': 0, 'all_files': [], 'schema_drift': []}\nall_columns = []\nfor stat in ${all_quarterly_stats}:\n    merged['quarters'].append(stat)\n    merged['total_rows'] += stat['row_count']\n    merged['all_files'].append(stat['file'])\n    all_columns.append(set(stat['column_stats'].keys()))\nif len(all_columns) > 1:\n    common = all_columns[0]\n    for s in all_columns[1:]:\n        common = common & s\n    for i, s in enumerate(all_columns):\n        diff = s - common\n        if diff:\n            merged['schema_drift'].append(f'File {i}: extra columns {diff}')\nenv['merged_results'] = merged"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "merge_results",
+          "output": {
+            "fields": [
+              {
+                "name": "quarters",
+                "typeName": "List<Record>"
+              },
+              {
+                "name": "total_rows",
+                "typeName": "Integer"
+              },
+              {
+                "name": "all_files",
+                "typeName": "List<String>"
+              },
+              {
+                "name": "schema_drift",
+                "typeName": "List<String>"
+              }
+            ],
+            "name": "merged_results",
+            "typeName": "Record"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputTypes": {
+            "merged_results": "Record"
+          },
+          "inputs": {
+            "code": "review = {'files_reviewed': len(${merged_results}['all_files']), 'total_rows': ${merged_results}['total_rows'], 'schema_drift': ${merged_results}['schema_drift'], 'notes': []}\nfor q in ${merged_results}['quarters']:\n    review['notes'].append(f\"File {q['file']}: {q['row_count']} rows processed\")\nenv['quality_review'] = review",
+            "merged_results": "${merged_results}"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "quality_review",
+          "output": {
+            "fields": [
+              {
+                "name": "files_reviewed",
+                "typeName": "Integer"
+              },
+              {
+                "name": "total_rows",
+                "typeName": "Integer"
+              },
+              {
+                "name": "schema_drift",
+                "typeName": "List<String>"
+              },
+              {
+                "name": "notes",
+                "typeName": "List<String>"
+              }
+            ],
+            "name": "quality_review",
+            "typeName": "Record"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputTypes": {
+            "merged_results": "Record",
+            "quality_review": "Record"
+          },
+          "inputs": {
+            "code": "lines = ['# Quarterly Sales Data Quality Report', '']\nlines.append('## Quality Review')\nlines.append(f\"Files reviewed: ${quality_review}['files_reviewed']\")\nlines.append(f\"Total rows: ${quality_review}['total_rows']\")\nif ${quality_review}['schema_drift']:\n    lines.append('### Schema Drift Detected')\n    for sd in ${quality_review}['schema_drift']:\n        lines.append(f'- {sd}')\nlines.append('')\nlines.append('## Evidence Log')\nfor note in ${quality_review}['notes']:\n    lines.append(f'- {note}')\nlines.append('')\nlines.append('## Quarterly Statistics')\nfor q in ${merged_results}['quarters']:\n    lines.append(f\"### {q['file']}\")\n    lines.append(f\"Rows: {q['row_count']}\")\n    for col, s in q['column_stats'].items():\n        lines.append(f'- **{col}**: {s}')\n    lines.append('')\nreport = '\\n'.join(lines)\nenv['final_report'] = report",
+            "merged_results": "${merged_results}",
+            "quality_review": "${quality_review}"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "generate_report",
+          "output": {
+            "fields": [],
+            "name": "final_report",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": null,
+          "children": [
+            "task_inputs",
+            "process_files",
+            "merge_results",
+            "quality_review",
+            "generate_report"
+          ],
+          "elseChildren": [],
+          "inputs": {},
+          "kind": "sequence",
+          "nodeId": "plan_root"
+        }
+      ],
+      "taskId": "fd3f5a5e-1b0a-4b1e-8c7a-9e2d4f6a8b01"
+    },
+    "final_plan": {
+      "controlFlow": [
+        {
+          "kind": "foreach",
+          "over": "inputs",
+          "step": "process_files"
+        }
+      ],
+      "dataFlow": [
+        {
+          "binding": "all_quarterly_stats",
+          "fromStep": "process_files",
+          "toStep": "merge_results"
+        },
+        {
+          "binding": "merged_results",
+          "fromStep": "merge_results",
+          "toStep": "quality_review"
+        },
+        {
+          "binding": "merged_results",
+          "fromStep": "merge_results",
+          "toStep": "generate_report"
+        },
+        {
+          "binding": "quality_review",
+          "fromStep": "quality_review",
+          "toStep": "generate_report"
+        }
+      ],
+      "goal": "Analyze quarterly sales CSV files by detecting data-quality issues, repairing recoverable problems, revalidating repaired data, computing quarterly statistics, merging results, running a quality review, and generating a consolidated Markdown report with an evidence log.",
+      "steps": [
+        {
+          "body": [
+            {
+              "capability": "csv.inspect_schema",
+              "code": "{\"path\": \"${item}\"}",
+              "inputBindings": [],
+              "kind": "primitive",
+              "name": "inspect_schema",
+              "output": {
+                "fields": [
+                  {
+                    "name": "columns",
+                    "typeName": "List<Record>"
+                  },
+                  {
+                    "name": "row_count",
+                    "typeName": "Integer"
+                  },
+                  {
+                    "name": "issues",
+                    "typeName": "List<String>"
+                  }
+                ],
+                "name": "schema_report",
+                "typeName": "Record"
+              }
+            },
+            {
+              "capability": "execute_python",
+              "code": "import pandas as pd\ndf = pd.read_csv('${item}')\nissues = []\nmissing = df.isnull().sum()\nfor col, count in missing.items():\n    if count > 0:\n        issues.append(f'{col}: {count} missing values')\ndupes = df.duplicated().sum()\nif dupes > 0:\n    issues.append(f'{dupes} duplicate rows')\nfor col in df.select_dtypes(include='number').columns:\n    q1 = df[col].quantile(0.25)\n    q3 = df[col].quantile(0.75)\n    iqr = q3 - q1\n    outliers = ((df[col] < q1 - 1.5*iqr) | (df[col] > q3 + 1.5*iqr)).sum()\n    if outliers > 0:\n        issues.append(f'{col}: {outliers} outliers')\nenv['issues_report'] = {'file': '${item}', 'issues': issues, 'row_count': len(df), 'columns': list(df.columns)}",
+              "inputBindings": [],
+              "kind": "primitive",
+              "name": "detect_issues",
+              "output": {
+                "fields": [
+                  {
+                    "name": "file",
+                    "typeName": "String"
+                  },
+                  {
+                    "name": "issues",
+                    "typeName": "List<String>"
+                  },
+                  {
+                    "name": "row_count",
+                    "typeName": "Integer"
+                  },
+                  {
+                    "name": "columns",
+                    "typeName": "List<String>"
+                  }
+                ],
+                "name": "issues_report",
+                "typeName": "Record"
+              }
+            },
+            {
+              "capability": "execute_python",
+              "code": "import pandas as pd\ndf = pd.read_csv('${item}')\nrepairs = []\nbefore = len(df)\ndf = df.drop_duplicates()\nif len(df) < before:\n    repairs.append(f'Removed {before - len(df)} duplicate rows')\nfor col in df.select_dtypes(include='number').columns:\n    if df[col].isnull().any():\n        median = df[col].median()\n        count = df[col].isnull().sum()\n        df[col] = df[col].fillna(median)\n        repairs.append(f'Filled {count} missing in {col} with median {median}')\nfor col in df.select_dtypes(include='object').columns:\n    if df[col].isnull().any():\n        mode = df[col].mode()[0]\n        count = df[col].isnull().sum()\n        df[col] = df[col].fillna(mode)\n        repairs.append(f'Filled {count} missing in {col} with mode {mode}')\nenv['repaired_data'] = {'file': '${item}', 'dataframe': df.to_dict('records'), 'repairs': repairs, 'row_count': len(df)}",
+              "inputBindings": [],
+              "kind": "primitive",
+              "name": "repair_issues",
+              "output": {
+                "fields": [
+                  {
+                    "name": "file",
+                    "typeName": "String"
+                  },
+                  {
+                    "name": "dataframe",
+                    "typeName": "List<Record>"
+                  },
+                  {
+                    "name": "repairs",
+                    "typeName": "List<String>"
+                  },
+                  {
+                    "name": "row_count",
+                    "typeName": "Integer"
+                  }
+                ],
+                "name": "repaired_data",
+                "typeName": "Record"
+              }
+            },
+            {
+              "capability": "execute_python",
+              "code": "import pandas as pd\ndf = pd.DataFrame(${repaired_data}['dataframe'])\nvalidation = []\nmissing = df.isnull().sum().sum()\nif missing == 0:\n    validation.append('No missing values remain')\nelse:\n    validation.append(f'{missing} missing values still present')\ndupes = df.duplicated().sum()\nif dupes == 0:\n    validation.append('No duplicate rows remain')\nelse:\n    validation.append(f'{dupes} duplicate rows still present')\nenv['validation_report'] = {'file': '${item}', 'validation': validation, 'is_clean': missing == 0 and dupes == 0}",
+              "inputBindings": [
+                {
+                  "binding": "repaired_data",
+                  "param": "repaired_data",
+                  "source": "repair_issues"
+                }
+              ],
+              "kind": "primitive",
+              "name": "revalidate",
+              "output": {
+                "fields": [
+                  {
+                    "name": "file",
+                    "typeName": "String"
+                  },
+                  {
+                    "name": "validation",
+                    "typeName": "List<String>"
+                  },
+                  {
+                    "name": "is_clean",
+                    "typeName": "Boolean"
+                  }
+                ],
+                "name": "validation_report",
+                "typeName": "Record"
+              }
+            },
+            {
+              "capability": "execute_python",
+              "code": "import pandas as pd\ndf = pd.DataFrame(${repaired_data}['dataframe'])\nstats = {'file': '${item}', 'row_count': len(df), 'column_stats': {}}\nfor col in df.select_dtypes(include='number').columns:\n    stats['column_stats'][col] = {'mean': float(df[col].mean()), 'median': float(df[col].median()), 'std': float(df[col].std()), 'min': float(df[col].min()), 'max': float(df[col].max()), 'sum': float(df[col].sum())}\nfor col in df.select_dtypes(include='object').columns:\n    stats['column_stats'][col] = {'unique_count': int(df[col].nunique()), 'most_common': str(df[col].value_counts().index[0]) if len(df[col].value_counts()) > 0 else ''}\nenv['quarterly_stats'] = stats",
+              "inputBindings": [
+                {
+                  "binding": "repaired_data",
+                  "param": "repaired_data",
+                  "source": "repair_issues"
+                }
+              ],
+              "kind": "primitive",
+              "name": "compute_stats",
+              "output": {
+                "fields": [
+                  {
+                    "name": "file",
+                    "typeName": "String"
+                  },
+                  {
+                    "name": "row_count",
+                    "typeName": "Integer"
+                  },
+                  {
+                    "name": "column_stats",
+                    "typeName": "Record"
+                  }
+                ],
+                "name": "quarterly_stats",
+                "typeName": "Record"
+              }
+            }
+          ],
+          "description": "Process each quarterly sales CSV file through schema inspection, issue detection, repair, revalidation, and statistics computation.",
+          "inputBindings": [],
+          "kind": "foreach",
+          "name": "process_files",
+          "output": {
+            "fields": [
+              {
+                "name": "file",
+                "typeName": "String"
+              },
+              {
+                "name": "row_count",
+                "typeName": "Integer"
+              },
+              {
+                "name": "column_stats",
+                "typeName": "Record"
+              }
+            ],
+            "name": "all_quarterly_stats",
+            "typeName": "List<Record>"
+          },
+          "over": "inputs"
+        },
+        {
+          "capability": "execute_python",
+          "code": "merged = {'quarters': [], 'total_rows': 0, 'all_files': [], 'schema_drift': []}\nall_columns = []\nfor stat in ${all_quarterly_stats}:\n    merged['quarters'].append(stat)\n    merged['total_rows'] += stat['row_count']\n    merged['all_files'].append(stat['file'])\n    all_columns.append(set(stat['column_stats'].keys()))\nif len(all_columns) > 1:\n    common = all_columns[0]\n    for s in all_columns[1:]:\n        common = common & s\n    for i, s in enumerate(all_columns):\n        diff = s - common\n        if diff:\n            merged['schema_drift'].append(f'File {i}: extra columns {diff}')\nenv['merged_results'] = merged",
+          "inputBindings": [
+            {
+              "binding": "all_quarterly_stats",
+              "param": "all_quarterly_stats",
+              "source": "process_files"
+            }
+          ],
+          "kind": "primitive",
+          "name": "merge_results",
+          "output": {
+            "fields": [
+              {
+                "name": "quarters",
+                "typeName": "List<Record>"
+              },
+              {
+                "name": "total_rows",
+                "typeName": "Integer"
+              },
+              {
+                "name": "all_files",
+                "typeName": "List<String>"
+              },
+              {
+                "name": "schema_drift",
+                "typeName": "List<String>"
+              }
+            ],
+            "name": "merged_results",
+            "typeName": "Record"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "code": "review = {'files_reviewed': len(${merged_results}['all_files']), 'total_rows': ${merged_results}['total_rows'], 'schema_drift': ${merged_results}['schema_drift'], 'notes': []}\nfor q in ${merged_results}['quarters']:\n    review['notes'].append(f\"File {q['file']}: {q['row_count']} rows processed\")\nenv['quality_review'] = review",
+          "inputBindings": [
+            {
+              "binding": "merged_results",
+              "param": "merged_results",
+              "source": "merge_results"
+            }
+          ],
+          "kind": "primitive",
+          "name": "quality_review",
+          "output": {
+            "fields": [
+              {
+                "name": "files_reviewed",
+                "typeName": "Integer"
+              },
+              {
+                "name": "total_rows",
+                "typeName": "Integer"
+              },
+              {
+                "name": "schema_drift",
+                "typeName": "List<String>"
+              },
+              {
+                "name": "notes",
+                "typeName": "List<String>"
+              }
+            ],
+            "name": "quality_review",
+            "typeName": "Record"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "code": "lines = ['# Quarterly Sales Data Quality Report', '']\nlines.append('## Quality Review')\nlines.append(f\"Files reviewed: ${quality_review}['files_reviewed']\")\nlines.append(f\"Total rows: ${quality_review}['total_rows']\")\nif ${quality_review}['schema_drift']:\n    lines.append('### Schema Drift Detected')\n    for sd in ${quality_review}['schema_drift']:\n        lines.append(f'- {sd}')\nlines.append('')\nlines.append('## Evidence Log')\nfor note in ${quality_review}['notes']:\n    lines.append(f'- {note}')\nlines.append('')\nlines.append('## Quarterly Statistics')\nfor q in ${merged_results}['quarters']:\n    lines.append(f\"### {q['file']}\")\n    lines.append(f\"Rows: {q['row_count']}\")\n    for col, s in q['column_stats'].items():\n        lines.append(f'- **{col}**: {s}')\n    lines.append('')\nreport = '\\n'.join(lines)\nenv['final_report'] = report",
+          "inputBindings": [
+            {
+              "binding": "quality_review",
+              "param": "quality_review",
+              "source": "quality_review"
+            },
+            {
+              "binding": "merged_results",
+              "param": "merged_results",
+              "source": "merge_results"
+            }
+          ],
+          "kind": "primitive",
+          "name": "generate_report",
+          "output": {
+            "fields": [],
+            "name": "final_report",
+            "typeName": "String"
+          }
+        }
+      ]
+    },
+    "initial_parse_error": "CIR schema mismatch: invalid type: map, expected a string",
+    "initial_raw_response": "{\n  \"goal\": \"Analyze quarterly sales CSV files by detecting data-quality issues, repairing recoverable problems, revalidating repaired data, computing quarterly statistics, merging results, running a quality review, and generating a consolidated Markdown report with an evidence log.\",\n  \"steps\": [\n    {\n      \"kind\": \"foreach\",\n      \"name\": \"process_files\",\n      \"over\": \"inputs\",\n      \"description\": \"Process each quarterly sales CSV file through detection, repair, revalidation, and statistics computation\",\n      \"body\": [\n        {\n          \"kind\": \"primitive\",\n          \"name\": \"inspect_schema\",\n          \"capability\": \"csv.inspect_schema\",\n          \"description\": \"Inspect CSV schema to discover columns, types, row count, and initial issues\",\n          \"code\": {\"path\": \"${item}\"},\n          \"output\": {\n            \"name\": \"schema_report\",\n            \"typeName\": \"Record\",\n            \"fields\": [\n              {\"name\": \"columns\", \"typeName\": \"List<Record>\"},\n              {\"name\": \"row_count\", \"typeName\": \"Integer\"},\n              {\"name\": \"issues\", \"typeName\": \"List<String>\"}\n            ]\n          }\n        },\n        {\n          \"kind\": \"primitive\",\n          \"name\": \"detect_issues\",\n          \"capability\": \"execute_python\",\n          \"description\": \"Detect data-quality issues: schema drift, type errors, missing values, duplicates, outliers\",\n          \"code\": \"import csv\\n\\nfile_path = \\\"${item}\\\"\\nschema = ${schema_report}\\n\\nwith open(file_path, 'r') as f:\\n    reader = csv.DictReader(f)\\n    rows = list(reader)\\n    columns = reader.fieldnames or []\\n\\nexpected_types = {}\\nfor col in schema.get('columns', []):\\n    expected_types[col['name']] = col['typeName']\\n\\ntype_errors = []\\nmissing_values = []\\nduplicates = []\\noutliers = []\\nschema_drift = []\\n\\nfor col in columns:\\n    if col not in expected_types:\\n        schema_drift.append(f\\\"Unexpected column: {col}\\\")\\n\\nfor i, row in enumerate(rows):\\n    for col in columns:\\n        val = row.get(col, '')\\n        if val is None or str(val).strip() == '':\\n            missing_values.append(f\\\"Row {i+1}, column '{col}': missing value\\\")\\n\\nseen = set()\\nfor i, row in enumerate(rows):\\n    row_tuple = tuple(row.values())\\n    if row_tuple in seen:\\n        duplicates.append(f\\\"Row {i+1}: duplicate of earlier row\\\")\\n    seen.add(row_tuple)\\n\\nfor col in columns:\\n    col_type = expected_types.get(col, 'String')\\n    numeric_values = []\\n    for i, row in enumerate(rows):\\n        val = row.get(col, '')\\n        if val is None or str(val).strip() == '':\\n            continue\\n        if col_type in ('Number', 'Integer'):\\n            try:\\n                numeric_values.append(float(val))\\n            except (ValueError, TypeError):\\n                type_errors.append(f\\\"Row {i+1}, column '{col}': expected {col_type}, got '{val}'\\\")\\n    if len(numeric_values) > 4:\\n        sorted_vals = sorted(numeric_values)\\n        q1 = sorted_vals[len(sorted_vals) // 4]\\n        q3 = sorted_vals[3 * len(sorted_vals) // 4]\\n        iqr = q3 - q1\\n        lower = q1 - 1.5 * iqr\\n        upper = q3 + 1.5 * iqr\\n        for i, row in enumerate(rows):\\n            val = row.get(col, '')\\n            if val is None or str(val).strip() == '':\\n                continue\\n            try:\\n                num = float(val)\\n                if num < lower or num > upper:\\n                    outliers.append(f\\\"Row {i+1}, column '{col}': value {num} outside [{lower:.2f}, {upper:.2f}]\\\")\\n            except (ValueError, TypeError):\\n                pass\\n\\nenv['issue_report'] = {\\n    'file': file_path,\\n    'type_errors': type_errors,\\n    'missing_values': missing_values,\\n    'duplicates': duplicates,\\n    'outliers': outliers,\\n    'schema_drift': schema_drift,\\n    'total_issues': len(type_errors) + len(missing_values) + len(duplicates) + len(outliers) + len(schema_drift)\\n}\",\n          \"inputBindings\": [\n            {\"param\": \"schema_report\", \"source\": \"inspect_schema\", \"binding\": \"schema_report\"}\n          ],\n          \"output\": {\n            \"name\": \"issue_report\",\n            \"typeName\": \"Record\",\n            \"fields\": [\n              {\"name\": \"file\", \"typeName\": \"String\"},\n              {\"name\": \"type_errors\", \"typeName\": \"List<String>\"},\n              {\"name\": \"missing_values\", \"typeName\": \"List<String>\"},\n              {\"name\": \"duplicates\", \"typeName\": \"List<String>\"},\n              {\"name\": \"outliers\", \"typeName\": \"List<String>\"},\n              {\"name\": \"schema_drift\", \"typeName\": \"List<String>\"},\n              {\"name\": \"total_issues\", \"typeName\": \"Integer\"}\n            ]\n          }\n        },\n        {\n          \"kind\": \"primitive\",\n          \"name\": \"repair_issues\",\n          \"capability\": \"execute_python\",\n          \"description\": \"Repair recoverable data-quality issues: coerce types, fill missing values, remove duplicates\",\n          \"code\": \"import csv\\nimport os\\n\\nfile_path = \\\"${item}\\\"\\nissues = ${issue_report}\\nschema = ${schema_report}\\n\\nwith open(file_path, 'r') as f:\\n    reader = csv.DictReader(f)\\n    rows = list(reader)\\n    columns = reader.fieldnames or []\\n\\nrepair_log = []\\n\\nfor i, row in enumerate(rows):\\n    for col in columns:\\n        val = row.get(col, '')\\n        if val is None or str(val).strip() == '':\\n            continue\\n        col_info = next((c for c in schema.get('columns', []) if c['name'] == col), None)\\n        if col_info and col_info['typeName'] in ('Number', 'Integer'):\\n            try:\\n                cleaned = str(val).strip().replace(',', '').replace('$', '')\\n                float(cleaned)\\n                if cleaned != str(val):\\n                    row[col] = cleaned\\n                    repair_log.append(f\\\"Row {i+1}, column '{col}': cleaned '{val}' -> '{cleaned}'\\\")\\n            except (ValueError, TypeError):\\n                pass\\n\\nfor i, row in enumerate(rows):\\n    for col in columns:\\n        val = row.get(col, '')\\n        if val is None or str(val).strip() == '':\\n            col_info = next((c for c in schema.get('columns', []) if c['name'] == col), None)\\n            if col_info and col_info['typeName'] in ('Number', 'Integer'):\\n                row[col] = '0'\\n                repair_log.append(f\\\"Row {i+1}, column '{col}': filled missing with 0\\\")\\n            elif col_info and col_info['typeName'] == 'String':\\n                row[col] = 'UNKNOWN'\\n                repair_log.append(f\\\"Row {i+1}, column '{col}': filled missing with 'UNKNOWN'\\\")\\n\\nseen = set()\\nunique_rows = []\\nfor i, row in enumerate(rows):\\n    row_tuple = tuple(row.values())\\n    if row_tuple not in seen:\\n        seen.add(row_tuple)\\n        unique_rows.append(row)\\n    else:\\n        repair_log.append(f\\\"Row {i+1}: removed duplicate\\\")\\n\\nrows = unique_rows\\n\\nrepaired_path = file_path.replace('.csv', '_repaired.csv')\\nwith open(repaired_path, 'w', newline='') as f:\\n    writer = csv.DictWriter(f, fieldnames=columns)\\n    writer.writeheader()\\n    writer.writerows(rows)\\n\\nenv['repair_result'] = {\\n    'file': file_path,\\n    'repaired_path': repaired_path,\\n    'repair_log': repair_log,\\n    'repairs_made': len(repair_log)\\n}\",\n          \"inputBindings\": [\n            {\"param\": \"issue_report\", \"source\": \"detect_issues\", \"binding\": \"issue_report\"},\n            {\"param\": \"schema_report\", \"source\": \"inspect_schema\", \"binding\": \"schema_report\"}\n          ],\n          \"output\": {\n            \"name\": \"repair_result\",\n            \"typeName\": \"Record\",\n            \"fields\": [\n              {\"name\": \"file\", \"typeName\": \"String\"},\n              {\"name\": \"repaired_path\", \"typeName\": \"String\"},\n              {\"name\": \"repair_log\", \"typeName\": \"List<String>\"},\n              {\"name\": \"repairs_made\", \"typeName\": \"Integer\"}\n            ]\n          }\n        },\n        {\n          \"kind\": \"primitive\",\n          \"name\": \"revalidate\",\n          \"capability\": \"execute_python\",\n          \"description\": \"Revalidate repaired inputs for remaining issues\",\n          \"code\": \"import csv\\n\\nrepaired_path = ${repair_result}['repaired_path']\\nfile_path = ${repair_result}['file']\\n\\nwith open(repaired_path, 'r') as f:\\n    reader = csv.DictReader(f)\\n    rows = list(reader)\\n    columns = reader.fieldnames or []\\n\\nremaining_issues = []\\npassed = True\\n\\nfor i, row in enumerate(rows):\\n    for col in columns:\\n        val = row.get(col, '')\\n        if val is None or str(val).strip() == '':\\n            remaining_issues.append(f\\\"Row {i+1}, column '{col}': still missing after repair\\\")\\n            passed = False\\n\\nseen = set()\\nfor i, row in enumerate(rows):\\n    row_tuple = tuple(row.values())\\n    if row_tuple in seen:\\n        remaining_issues.append(f\\\"Row {i+1}: still duplicate after repair\\\")\\n        passed = False\\n    seen.add(row_tuple)\\n\\nenv['revalidation_report'] = {\\n    'file': file_path,\\n    'repaired_path': repaired_path,\\n    'remaining_issues': remaining_issues,\\n    'passed': passed,\\n    'row_count': len(rows)\\n}\",\n          \"inputBindings\": [\n            {\"param\": \"repair_result\", \"source\": \"repair_issues\", \"binding\": \"repair_result\"}\n          ],\n          \"output\": {\n            \"name\": \"revalidation_report\",\n            \"typeName\": \"Record\",\n            \"fields\": [\n              {\"name\": \"file\", \"typeName\": \"String\"},\n              {\"name\": \"repaired_path\", \"typeName\": \"String\"},\n              {\"name\": \"remaining_issues\", \"typeName\": \"List<String>\"},\n              {\"name\": \"passed\", \"typeName\": \"Boolean\"},\n              {\"name\": \"row_count\", \"typeName\": \"Integer\"}\n            ]\n          }\n        },\n        {\n          \"kind\": \"primitive\",\n          \"name\": \"compute_stats\",\n          \"capability\": \"execute_python\",\n          \"description\": \"Compute quarterly statistics from repaired data\",\n          \"code\": \"import csv\\nimport os\\n\\nrepaired_path = ${repair_result}['repaired_path']\\nfile_path = ${repair_result}['file']\\n\\nwith open(repaired_path, 'r') as f:\\n    reader = csv.DictReader(f)\\n    rows = list(reader)\\n    columns = reader.fieldnames or []\\n\\nnumeric_cols = []\\nfor col in columns:\\n    is_numeric = True\\n    count = 0\\n    for row in rows:\\n        val = row.get(col, '')\\n        if val and str(val).strip():\\n            try:\\n                float(val)\\n                count += 1\\n            except (ValueError, TypeError):\\n                is_numeric = False\\n                break\\n    if is_numeric and count > 0:\\n        numeric_cols.append(col)\\n\\nstats = {}\\nfor col in numeric_cols:\\n    values = []\\n    for row in rows:\\n        val = row.get(col, '')\\n        if val and str(val).strip():\\n            try:\\n                values.append(float(val))\\n            except (ValueError, TypeError):\\n                pass\\n    if values:\\n        stats[col] = {\\n            'sum': sum(values),\\n            'count': len(values),\\n            'mean': sum(values) / len(values),\\n            'min': min(values),\\n            'max': max(values)\\n        }\\n\\nquarter = os.path.basename(file_path).replace('.csv', '')\\n\\nenv['quarterly_stats'] = {\\n    'file': file_path,\\n    'quarter': quarter,\\n    'row_count': len(rows),\\n    'column_count': len(columns),\\n    'numeric_stats': stats\\n}\",\n          \"inputBindings\": [\n            {\"param\": \"repair_result\", \"source\": \"repair_issues\", \"binding\": \"repair_result\"}\n          ],\n          \"output\": {\n            \"name\": \"quarterly_stats\",\n            \"typeName\": \"Record\",\n            \"fields\": [\n              {\"name\": \"file\", \"typeName\": \"String\"},\n              {\"name\": \"quarter\", \"typeName\": \"String\"},\n              {\"name\": \"row_count\", \"typeName\": \"Integer\"},\n              {\"name\": \"column_count\", \"typeName\": \"Integer\"},\n              {\"name\": \"numeric_stats\", \"typeName\": \"Record\"}\n            ]\n          }\n        },\n        {\n          \"kind\": \"primitive\",\n          \"name\": \"assemble_file_analysis\",\n          \"capability\": \"execute_python\",\n          \"description\": \"Assemble all per-file analysis results into a single record\",\n          \"code\": \"env['file_analysis'] = {\\n    'file': '${item}',\\n    'schema_report': ${schema_report},\\n    'issue_report': ${issue_report},\\n    'repair_result': ${repair_result},\\n    'revalidation_report': ${revalidation_report},\\n    'quarterly_stats': ${quarterly_stats}\\n}\",\n          \"inputBindings\": [\n            {\"param\": \"schema_report\", \"source\": \"inspect_schema\", \"binding\": \"schema_report\"},\n            {\"param\": \"issue_report\", \"source\": \"detect_issues\", \"binding\": \"issue_report\"},\n            {\"param\": \"repair_result\", \"source\": \"repair_issues\", \"binding\": \"repair_result\"},\n            {\"param\": \"revalidation_report\", \"source\": \"revalidate\", \"binding\": \"revalidation_report\"},\n            {\"param\": \"quarterly_stats\", \"source\": \"compute_stats\", \"binding\": \"quarterly_stats\"}\n          ],\n          \"output\": {\n            \"name\": \"file_analysis\",\n            \"typeName\": \"Record\",\n            \"fields\": [\n              {\"name\": \"file\", \"typeName\": \"String\"},\n              {\"name\": \"schema_report\", \"typeName\": \"Record\"},\n              {\"name\": \"issue_report\", \"typeName\": \"Record\"},\n              {\"name\": \"repair_result\", \"typeName\": \"Record\"},\n              {\"name\": \"revalidation_report\", \"typeName\": \"Record\"},\n              {\"name\": \"quarterly_stats\", \"typeName\": \"Record\"}\n            ]\n          }\n        }\n      ],\n      \"output\": {\n        \"name\": \"all_file_analyses\",\n        \"typeName\": \"List<Record>\"\n      }\n    },\n    {\n      \"kind\": \"primitive\",\n      \"name\": \"merge_results\",\n      \"capability\": \"execute_python\",\n      \"description\": \"Merge results from all quarterly files into a single structure\",\n      \"code\": \"analyses = ${all_file_analyses}\\n\\nmerged = {\\n    'files': [],\\n    'total_issues_detected': 0,\\n    'total_repairs_made': 0,\\n    'total_remaining_issues': 0,\\n    'all_issue_reports': [],\\n    'all_repair_logs': [],\\n    'all_revalidation_reports': [],\\n    'all_quarterly_stats': [],\\n    'all_schema_reports': []\\n}\\n\\nfor analysis in analyses:\\n    merged['files'].append(analysis['file'])\\n    merged['total_issues_detected'] += analysis['issue_report']['total_issues']\\n    merged['total_repairs_made'] += analysis['repair_result']['repairs_made']\\n    merged['total_remaining_issues'] += len(analysis['revalidation_report']['remaining_issues'])\\n    merged['all_issue_reports'].append(analysis['issue_report'])\\n    merged['all_repair_logs'].append(analysis['repair_result'])\\n    merged['all_revalidation_reports'].append(analysis['revalidation_report'])\\n    merged['all_quarterly_stats'].append(analysis['quarterly_stats'])\\n    merged['all_schema_reports'].append(analysis['schema_report'])\\n\\nenv['merged_results'] = merged\",\n      \"inputBindings\": [\n        {\"param\": \"all_file_analyses\", \"source\": \"process_files\", \"binding\": \"all_file_analyses\"}\n      ],\n      \"output\": {\n        \"name\": \"merged_results\",\n        \"typeName\": \"Record\",\n        \"fields\": [\n          {\"name\": \"files\", \"typeName\": \"List<String>\"},\n          {\"name\": \"total_issues_detected\", \"typeName\": \"Integer\"},\n          {\"name\": \"total_repairs_made\", \"typeName\": \"Integer\"},\n          {\"name\": \"total_remaining_issues\", \"typeName\": \"Integer\"},\n          {\"name\": \"all_issue_reports\", \"typeName\": \"List<Record>\"},\n          {\"name\": \"all_repair_logs\", \"typeName\": \"List<Record>\"},\n          {\"name\": \"all_revalidation_reports\", \"typeName\": \"List<Record>\"},\n          {\"name\": \"all_quarterly_stats\", \"typeName\": \"List<Record>\"},\n          {\"name\": \"all_schema_reports\", \"typeName\": \"List<Record>\"}\n        ]\n      }\n    },\n    {\n      \"kind\": \"primitive\",\n      \"name\": \"quality_review\",\n      \"capability\": \"execute_python\",\n      \"description\": \"Run a quality review on merged results to assess overall data health\",\n      \"code\": \"merged = ${merged_results}\\n\\nreview = {\\n    'overall_quality': 'PASS',\\n    'concerns': [],\\n    'recommendations': []\\n}\\n\\nfor rv in merged['all_revalidation_reports']:\\n    if not rv['passed']:\\n        review['overall_quality'] = 'FAIL'\\n        review['concerns'].append(f\\\"File {rv['file']} failed revalidation with {len(rv['remaining_issues'])} remaining issues\\\")\\n\\nfor ir in merged['all_issue_reports']:\\n    if ir['total_issues'] > 50:\\n        review['concerns'].append(f\\\"File {ir['file']} had {ir['total_issues']} issues - high issue rate\\\")\\n\\nfor ir in merged['all_issue_reports']:\\n    if ir['schema_drift']:\\n        review['concerns'].append(f\\\"File {ir['file']} has schema drift: {ir['schema_drift']}\\\")\\n\\nif merged['total_remaining_issues'] > 0:\\n    review['recommendations'].append('Address remaining data quality issues before final reporting')\\nif merged['total_issues_detected'] > 0:\\n    review['recommendations'].append('Review data collection processes to reduce source-level issues')\\n\\nif not review['concerns']:\\n    review['overall_quality'] = 'PASS'\\n    review['recommendations'].append('All files passed quality checks')\\n\\nenv['quality_review'] = review\",\n      \"inputBindings\": [\n        {\"param\": \"merged_results\", \"source\": \"merge_results\", \"binding\": \"merged_results\"}\n      ],\n      \"output\": {\n        \"name\": \"quality_review\",\n        \"typeName\": \"Record\",\n        \"fields\": [\n          {\"name\": \"overall_quality\", \"typeName\": \"String\"},\n          {\"name\": \"concerns\", \"typeName\": \"List<String>\"},\n          {\"name\": \"recommendations\", \"typeName\": \"List<String>\"}\n        ]\n      }\n    },\n    {\n      \"kind\": \"primitive\",\n      \"name\": \"generate_report\",\n      \"capability\": \"execute_python\",\n      \"description\": \"Generate consolidated Markdown report with evidence log\",\n      \"code\": \"merged = ${merged_results}\\nreview = ${quality_review}\\n\\nlines = []\\nlines.append('# Quarterly Sales Data Quality Report')\\nlines.append('')\\nlines.append('## Executive Summary')\\nlines.append('')\\nlines.append(f\\\"- **Files Analyzed**: {len(merged['files'])}\\\")\\nlines.append(f\\\"- **Total Issues Detected**: {merged['total_issues_detected']}\\\")\\nlines.append(f\\\"- **Total Repairs Made**: {merged['total_repairs_made']}\\\")\\nlines.append(f\\\"- **Total Remaining Issues**: {merged['total_remaining_issues']}\\\")\\nlines.append(f\\\"- **Overall Quality**: {review['overall_quality']}\\\")\\nlines.append('')\\n\\nlines.append('## Quality Review')\\nlines.append('')\\nif review['concerns']:\\n    lines.append('### Concerns')\\n    for c in review['concerns']:\\n        lines.append(f'- {c}')\\n    lines.append('')\\nif review['recommendations']:\\n    lines.append('### Recommendations')\\n    for r in review['recommendations']:\\n        lines.append(f'- {r}')\\n    lines.append('')\\n\\nlines.append('## Quarterly Statistics')\\nlines.append('')\\nfor qs in merged['all_quarterly_stats']:\\n    lines.append(f\\\"### {qs['quarter']}\\\")\\n    lines.append(f\\\"- Rows: {qs['row_count']}\\\")\\n    lines.append(f\\\"- Columns: {qs['column_count']}\\\")\\n    if qs['numeric_stats']:\\n        lines.append('| Column | Sum | Count | Mean | Min | Max |')\\n        lines.append('|--------|-----|-------|------|-----|-----|')\\n        for col, s in qs['numeric_stats'].items():\\n            lines.append(f\\\"| {col} | {s['sum']:.2f} | {s['count']} | {s['mean']:.2f} | {s['min']:.2f} | {s['max']:.2f} |\\\")\\n    lines.append('')\\n\\nlines.append('## Evidence Log')\\nlines.append('')\\nfor i, ir in enumerate(merged['all_issue_reports']):\\n    lines.append(f\\\"### File: {ir['file']}\\\")\\n    lines.append('')\\n    lines.append(f\\\"**Total Issues**: {ir['total_issues']}\\\")\\n    lines.append('')\\n    if ir['schema_drift']:\\n        lines.append('#### Schema Drift')\\n        for issue in ir['schema_drift']:\\n            lines.append(f'- {issue}')\\n        lines.append('')\\n    if ir['type_errors']:\\n        lines.append('#### Type Errors')\\n        for issue in ir['type_errors'][:20]:\\n            lines.append(f'- {issue}')\\n        if len(ir['type_errors']) > 20:\\n            lines.append(f'- ... and {len(ir[\\\"type_errors\\\"]) - 20} more')\\n        lines.append('')\\n    if ir['missing_values']:\\n        lines.append('#### Missing Values')\\n        for issue in ir['missing_values'][:20]:\\n            lines.append(f'- {issue}')\\n        if len(ir['missing_values']) > 20:\\n            lines.append(f'- ... and {len(ir[\\\"missing_values\\\"]) - 20} more')\\n        lines.append('')\\n    if ir['duplicates']:\\n        lines.append('#### Duplicates')\\n        for issue in ir['duplicates'][:20]:\\n            lines.append(f'- {issue}')\\n        if len(ir['duplicates']) > 20:\\n            lines.append(f'- ... and {len(ir[\\\"duplicates\\\"]) - 20} more')\\n        lines.append('')\\n    if ir['outliers']:\\n        lines.append('#### Outliers')\\n        for issue in ir['outliers'][:20]:\\n            lines.append(f'- {issue}')\\n        if len(ir['outliers']) > 20:\\n            lines.append(f'- ... and {len(ir[\\\"outliers\\\"]) - 20} more')\\n        lines.append('')\\n    rl = merged['all_repair_logs'][i]\\n    if rl['repair_log']:\\n        lines.append('#### Repairs Applied')\\n        for entry in rl['repair_log'][:20]:\\n            lines.append(f'- {entry}')\\n        if len(rl['repair_log']) > 20:\\n            lines.append(f'- ... and {len(rl[\\\"repair_log\\\"]) - 20} more')\\n        lines.append('')\\n    rv = merged['all_revalidation_reports'][i]\\n    lines.append(f\\\"**Revalidation**: {'PASSED' if rv['passed'] else 'FAILED'}\\\")\\n    if rv['remaining_issues']:\\n        for issue in rv['remaining_issues']:\\n            lines.append(f'- {issue}')\\n    lines.append('')\\n\\nreport = '\\\\n'.join(lines)\\nenv['report'] = report\",\n      \"inputBindings\": [\n        {\"param\": \"merged_results\", \"source\": \"merge_results\", \"binding\": \"merged_results\"},\n        {\"param\": \"quality_review\", \"source\": \"quality_review\", \"binding\": \"quality_review\"}\n      ],\n      \"output\": {\n        \"name\": \"report\",\n        \"typeName\": \"String\"\n      }\n    }\n  ],\n  \"dataFlow\": [\n    {\"fromStep\": \"inspect_schema\", \"toStep\": \"detect_issues\", \"binding\": \"schema_report\"},\n    {\"fromStep\": \"inspect_schema\", \"toStep\": \"repair_issues\", \"binding\": \"schema_report\"},\n    {\"fromStep\": \"detect_issues\", \"toStep\": \"repair_issues\", \"binding\": \"issue_report\"},\n    {\"fromStep\": \"repair_issues\", \"toStep\": \"revalidate\", \"binding\": \"repair_result\"},\n    {\"fromStep\": \"repair_issues\", \"toStep\": \"compute_stats\", \"binding\": \"repair_result\"},\n    {\"fromStep\": \"inspect_schema\", \"toStep\": \"assemble_file_analysis\", \"binding\": \"schema_report\"},\n    {\"fromStep\": \"detect_issues\", \"toStep\": \"assemble_file_analysis\", \"binding\": \"issue_report\"},\n    {\"fromStep\": \"repair_issues\", \"toStep\": \"assemble_file_analysis\", \"binding\": \"repair_result\"},\n    {\"fromStep\": \"revalidate\", \"toStep\": \"assemble_file_analysis\", \"binding\": \"revalidation_report\"},\n    {\"fromStep\": \"compute_stats\", \"toStep\": \"assemble_file_analysis\", \"binding\": \"quarterly_stats\"},\n    {\"fromStep\": \"process_files\", \"toStep\": \"merge_results\", \"binding\": \"all_file_analyses\"},\n    {\"fromStep\": \"merge_results\", \"toStep\": \"quality_review\", \"binding\": \"merged_results\"},\n    {\"fromStep\": \"merge_results\", \"toStep\": \"generate_report\", \"binding\": \"merged_results\"},\n    {\"fromStep\": \"quality_review\", \"toStep\": \"generate_report\", \"binding\": \"quality_review\"}\n  ],\n  \"controlFlow\": [\n    {\"step\": \"process_files\", \"kind\": \"foreach\", \"over\": \"inputs\"}\n  ]\n}",
+    "repair_count": 1,
+    "repair_traces": [
+      {
+        "attempt": 1,
+        "prompt": "Your previous output failed plan validation. Produce a corrected plan for the task below.\n\nProduce an execution plan for the following ACOS task.\n\n# Task Goal\n\nAnalyze all quarterly sales CSV files in the dataset directory. For each file: detect data-quality issues (schema drift, type errors, missing values, duplicates, outliers); repair recoverable issues; revalidate repaired inputs; compute quarterly statistics; merge results; run a quality review; and generate a consolidated Markdown report with an evidence log.\n\n# Declared Inputs (for awareness only)\n\nThe task declares these input files; your plan MUST NOT embed any path — use `\"over\": \"inputs\"` for per-file processing:\n\n1. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv\", format=\"csv\"\n2. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv\", format=\"csv\"\n3. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv\", format=\"csv\"\n4. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv\", format=\"csv\"\n\n# Required Outputs\n\nThe plan MUST produce:\n\n- type=\"Report\", format=\"markdown\"\n\n# Constraints\n\n\n# Instructions\n\nThink through the task's required operations (detection, repair, validation, aggregation, reporting) and express them as plan steps. Return ONLY the plan JSON.\n\nPrevious error:\nCIR schema mismatch: invalid type: map, expected a string\n\nOriginal output excerpt:\n```\n{\n  \"goal\": \"Analyze quarterly sales CSV files by detecting data-quality issues, repairing recoverable problems, revalidating repaired data, computing quarterly statistics, merging results, running a quality review, and generating a consolidated Markdown report with an evidence log.\",\n  \"steps\": [\n    {\n      \"kind\": \"foreach\",\n      \"name\": \"process_files\",\n      \"over\": \"inputs\",\n      \"description\": \"Process each quarterly sales CSV file through detection, repair, revalidation, and statistics\n```\n\nAnalyze the error and return a corrected plan JSON.\nRespond with ONLY the corrected JSON, no commentary.",
+        "raw_response": "{\n  \"goal\": \"Analyze quarterly sales CSV files by detecting data-quality issues, repairing recoverable problems, revalidating repaired data, computing quarterly statistics, merging results, running a quality review, and generating a consolidated Markdown report with an evidence log.\",\n  \"steps\": [\n    {\n      \"kind\": \"foreach\",\n      \"name\": \"process_files\",\n      \"over\": \"inputs\",\n      \"description\": \"Process each quarterly sales CSV file through schema inspection, issue detection, repair, revalidation, and statistics computation.\",\n      \"body\": [\n        {\n          \"kind\": \"primitive\",\n          \"name\": \"inspect_schema\",\n          \"capability\": \"csv.inspect_schema\",\n          \"code\": \"{\\\"path\\\": \\\"${item}\\\"}\",\n          \"inputBindings\": [],\n          \"output\": {\n            \"name\": \"schema_report\",\n            \"typeName\": \"Record\",\n            \"fields\": [\n              { \"name\": \"columns\", \"typeName\": \"List<Record>\" },\n              { \"name\": \"row_count\", \"typeName\": \"Integer\" },\n              { \"name\": \"issues\", \"typeName\": \"List<String>\" }\n            ]\n          }\n        },\n        {\n          \"kind\": \"primitive\",\n          \"name\": \"detect_issues\",\n          \"capability\": \"execute_python\",\n          \"code\": \"import pandas as pd\\ndf = pd.read_csv('${item}')\\nissues = []\\nmissing = df.isnull().sum()\\nfor col, count in missing.items():\\n    if count > 0:\\n        issues.append(f'{col}: {count} missing values')\\ndupes = df.duplicated().sum()\\nif dupes > 0:\\n    issues.append(f'{dupes} duplicate rows')\\nfor col in df.select_dtypes(include='number').columns:\\n    q1 = df[col].quantile(0.25)\\n    q3 = df[col].quantile(0.75)\\n    iqr = q3 - q1\\n    outliers = ((df[col] < q1 - 1.5*iqr) | (df[col] > q3 + 1.5*iqr)).sum()\\n    if outliers > 0:\\n        issues.append(f'{col}: {outliers} outliers')\\nenv['issues_report'] = {'file': '${item}', 'issues': issues, 'row_count': len(df), 'columns': list(df.columns)}\",\n          \"inputBindings\": [],\n          \"output\": {\n            \"name\": \"issues_report\",\n            \"typeName\": \"Record\",\n            \"fields\": [\n              { \"name\": \"file\", \"typeName\": \"String\" },\n              { \"name\": \"issues\", \"typeName\": \"List<String>\" },\n              { \"name\": \"row_count\", \"typeName\": \"Integer\" },\n              { \"name\": \"columns\", \"typeName\": \"List<String>\" }\n            ]\n          }\n        },\n        {\n          \"kind\": \"primitive\",\n          \"name\": \"repair_issues\",\n          \"capability\": \"execute_python\",\n          \"code\": \"import pandas as pd\\ndf = pd.read_csv('${item}')\\nrepairs = []\\nbefore = len(df)\\ndf = df.drop_duplicates()\\nif len(df) < before:\\n    repairs.append(f'Removed {before - len(df)} duplicate rows')\\nfor col in df.select_dtypes(include='number').columns:\\n    if df[col].isnull().any():\\n        median = df[col].median()\\n        count = df[col].isnull().sum()\\n        df[col] = df[col].fillna(median)\\n        repairs.append(f'Filled {count} missing in {col} with median {median}')\\nfor col in df.select_dtypes(include='object').columns:\\n    if df[col].isnull().any():\\n        mode = df[col].mode()[0]\\n        count = df[col].isnull().sum()\\n        df[col] = df[col].fillna(mode)\\n        repairs.append(f'Filled {count} missing in {col} with mode {mode}')\\nenv['repaired_data'] = {'file': '${item}', 'dataframe': df.to_dict('records'), 'repairs': repairs, 'row_count': len(df)}\",\n          \"inputBindings\": [],\n          \"output\": {\n            \"name\": \"repaired_data\",\n            \"typeName\": \"Record\",\n            \"fields\": [\n              { \"name\": \"file\", \"typeName\": \"String\" },\n              { \"name\": \"dataframe\", \"typeName\": \"List<Record>\" },\n              { \"name\": \"repairs\", \"typeName\": \"List<String>\" },\n              { \"name\": \"row_count\", \"typeName\": \"Integer\" }\n            ]\n          }\n        },\n        {\n          \"kind\": \"primitive\",\n          \"name\": \"revalidate\",\n          \"capability\": \"execute_python\",\n          \"code\": \"import pandas as pd\\ndf = pd.DataFrame(${repaired_data}['dataframe'])\\nvalidation = []\\nmissing = df.isnull().sum().sum()\\nif missing == 0:\\n    validation.append('No missing values remain')\\nelse:\\n    validation.append(f'{missing} missing values still present')\\ndupes = df.duplicated().sum()\\nif dupes == 0:\\n    validation.append('No duplicate rows remain')\\nelse:\\n    validation.append(f'{dupes} duplicate rows still present')\\nenv['validation_report'] = {'file': '${item}', 'validation': validation, 'is_clean': missing == 0 and dupes == 0}\",\n          \"inputBindings\": [\n            { \"param\": \"repaired_data\", \"source\": \"repair_issues\", \"binding\": \"repaired_data\" }\n          ],\n          \"output\": {\n            \"name\": \"validation_report\",\n            \"typeName\": \"Record\",\n            \"fields\": [\n              { \"name\": \"file\", \"typeName\": \"String\" },\n              { \"name\": \"validation\", \"typeName\": \"List<String>\" },\n              { \"name\": \"is_clean\", \"typeName\": \"Boolean\" }\n            ]\n          }\n        },\n        {\n          \"kind\": \"primitive\",\n          \"name\": \"compute_stats\",\n          \"capability\": \"execute_python\",\n          \"code\": \"import pandas as pd\\ndf = pd.DataFrame(${repaired_data}['dataframe'])\\nstats = {'file': '${item}', 'row_count': len(df), 'column_stats': {}}\\nfor col in df.select_dtypes(include='number').columns:\\n    stats['column_stats'][col] = {'mean': float(df[col].mean()), 'median': float(df[col].median()), 'std': float(df[col].std()), 'min': float(df[col].min()), 'max': float(df[col].max()), 'sum': float(df[col].sum())}\\nfor col in df.select_dtypes(include='object').columns:\\n    stats['column_stats'][col] = {'unique_count': int(df[col].nunique()), 'most_common': str(df[col].value_counts().index[0]) if len(df[col].value_counts()) > 0 else ''}\\nenv['quarterly_stats'] = stats\",\n          \"inputBindings\": [\n            { \"param\": \"repaired_data\", \"source\": \"repair_issues\", \"binding\": \"repaired_data\" }\n          ],\n          \"output\": {\n            \"name\": \"quarterly_stats\",\n            \"typeName\": \"Record\",\n            \"fields\": [\n              { \"name\": \"file\", \"typeName\": \"String\" },\n              { \"name\": \"row_count\", \"typeName\": \"Integer\" },\n              { \"name\": \"column_stats\", \"typeName\": \"Record\" }\n            ]\n          }\n        }\n      ],\n      \"output\": {\n        \"name\": \"all_quarterly_stats\",\n        \"typeName\": \"List<Record>\",\n        \"fields\": [\n          { \"name\": \"file\", \"typeName\": \"String\" },\n          { \"name\": \"row_count\", \"typeName\": \"Integer\" },\n          { \"name\": \"column_stats\", \"typeName\": \"Record\" }\n        ]\n      }\n    },\n    {\n      \"kind\": \"primitive\",\n      \"name\": \"merge_results\",\n      \"capability\": \"execute_python\",\n      \"code\": \"merged = {'quarters': [], 'total_rows': 0, 'all_files': [], 'schema_drift': []}\\nall_columns = []\\nfor stat in ${all_quarterly_stats}:\\n    merged['quarters'].append(stat)\\n    merged['total_rows'] += stat['row_count']\\n    merged['all_files'].append(stat['file'])\\n    all_columns.append(set(stat['column_stats'].keys()))\\nif len(all_columns) > 1:\\n    common = all_columns[0]\\n    for s in all_columns[1:]:\\n        common = common & s\\n    for i, s in enumerate(all_columns):\\n        diff = s - common\\n        if diff:\\n            merged['schema_drift'].append(f'File {i}: extra columns {diff}')\\nenv['merged_results'] = merged\",\n      \"inputBindings\": [\n        { \"param\": \"all_quarterly_stats\", \"source\": \"process_files\", \"binding\": \"all_quarterly_stats\" }\n      ],\n      \"output\": {\n        \"name\": \"merged_results\",\n        \"typeName\": \"Record\",\n        \"fields\": [\n          { \"name\": \"quarters\", \"typeName\": \"List<Record>\" },\n          { \"name\": \"total_rows\", \"typeName\": \"Integer\" },\n          { \"name\": \"all_files\", \"typeName\": \"List<String>\" },\n          { \"name\": \"schema_drift\", \"typeName\": \"List<String>\" }\n        ]\n      }\n    },\n    {\n      \"kind\": \"primitive\",\n      \"name\": \"quality_review\",\n      \"capability\": \"execute_python\",\n      \"code\": \"review = {'files_reviewed': len(${merged_results}['all_files']), 'total_rows': ${merged_results}['total_rows'], 'schema_drift': ${merged_results}['schema_drift'], 'notes': []}\\nfor q in ${merged_results}['quarters']:\\n    review['notes'].append(f\\\"File {q['file']}: {q['row_count']} rows processed\\\")\\nenv['quality_review'] = review\",\n      \"inputBindings\": [\n        { \"param\": \"merged_results\", \"source\": \"merge_results\", \"binding\": \"merged_results\" }\n      ],\n      \"output\": {\n        \"name\": \"quality_review\",\n        \"typeName\": \"Record\",\n        \"fields\": [\n          { \"name\": \"files_reviewed\", \"typeName\": \"Integer\" },\n          { \"name\": \"total_rows\", \"typeName\": \"Integer\" },\n          { \"name\": \"schema_drift\", \"typeName\": \"List<String>\" },\n          { \"name\": \"notes\", \"typeName\": \"List<String>\" }\n        ]\n      }\n    },\n    {\n      \"kind\": \"primitive\",\n      \"name\": \"generate_report\",\n      \"capability\": \"execute_python\",\n      \"code\": \"lines = ['# Quarterly Sales Data Quality Report', '']\\nlines.append('## Quality Review')\\nlines.append(f\\\"Files reviewed: ${quality_review}['files_reviewed']\\\")\\nlines.append(f\\\"Total rows: ${quality_review}['total_rows']\\\")\\nif ${quality_review}['schema_drift']:\\n    lines.append('### Schema Drift Detected')\\n    for sd in ${quality_review}['schema_drift']:\\n        lines.append(f'- {sd}')\\nlines.append('')\\nlines.append('## Evidence Log')\\nfor note in ${quality_review}['notes']:\\n    lines.append(f'- {note}')\\nlines.append('')\\nlines.append('## Quarterly Statistics')\\nfor q in ${merged_results}['quarters']:\\n    lines.append(f\\\"### {q['file']}\\\")\\n    lines.append(f\\\"Rows: {q['row_count']}\\\")\\n    for col, s in q['column_stats'].items():\\n        lines.append(f'- **{col}**: {s}')\\n    lines.append('')\\nreport = '\\\\n'.join(lines)\\nenv['final_report'] = report\",\n      \"inputBindings\": [\n        { \"param\": \"quality_review\", \"source\": \"quality_review\", \"binding\": \"quality_review\" },\n        { \"param\": \"merged_results\", \"source\": \"merge_results\", \"binding\": \"merged_results\" }\n      ],\n      \"output\": {\n        \"name\": \"final_report\",\n        \"typeName\": \"String\",\n        \"fields\": []\n      }\n    }\n  ],\n  \"dataFlow\": [\n    { \"fromStep\": \"process_files\", \"toStep\": \"merge_results\", \"binding\": \"all_quarterly_stats\" },\n    { \"fromStep\": \"merge_results\", \"toStep\": \"quality_review\", \"binding\": \"merged_results\" },\n    { \"fromStep\": \"merge_results\", \"toStep\": \"generate_report\", \"binding\": \"merged_results\" },\n    { \"fromStep\": \"quality_review\", \"toStep\": \"generate_report\", \"binding\": \"quality_review\" }\n  ],\n  \"controlFlow\": [\n    { \"step\": \"process_files\", \"kind\": \"foreach\", \"over\": \"inputs\" }\n  ]\n}",
+        "validation_error": null
+      }
+    ]
+  },
+  "plan_metrics": {
+    "conditional_count": 0,
+    "control_intent_count": 1,
+    "foreach_count": 1,
+    "retry_count": 0,
+    "step_count": 4
+  },
+  "program_metrics": {
+    "capability_types": [
+      "csv.inspect_schema",
+      "execute_python"
+    ],
+    "condition_count": 0,
+    "control_node_count": 1,
+    "loop_count": 1,
+    "node_count": 11,
+    "primitive_count": 9,
+    "retry_count": 0
+  },
+  "repair_tax": {
+    "first_pass_success": false,
+    "repair_attempts_used": 1,
+    "repair_latency_ms": 357260
+  },
+  "run": {
+    "compile_success": true,
+    "final_error": null,
+    "mode": "plan",
+    "model": "LongCat-2.0",
+    "run_index": 1,
+    "timestamp": "2026-09-05T05:42:52Z"
+  },
+  "timing": {
+    "initial_llm_ms": 349598,
+    "repair_llm_ms": 357260,
+    "total_compile_ms": 706861,
+    "total_wall_ms": 707708
+  }
+}
