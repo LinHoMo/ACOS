@@ -12,7 +12,7 @@ P1-4 Fixed Workflow           ✅ confirms: Runtime + Verification value
 P1-5A Compiler Robustness     ✅
 P1-5B Direct Task → CIR       ❌ (P1-5B v0.1 有效负结果)
 P1-5B v0.2                    ✅ FROZEN / NOT SUPPORTED（中间命题支持：Plan IR 架构方向有效）
-P1-5B v0.3                    🔬 NEXT: Capability Contract & Typed Execution
+P1-5B v0.3                    ✅ FROZEN / H-C NOT SUPPORTED（Compile 20% 崩坏：code-as-map 序列化契约未内化）
 ```
 
 **核心设计原则（三组数据共同支持）**：
@@ -192,6 +192,14 @@ Execution
   - 判定：命题 B NOT SUPPORTED（comp 33% < 70% ∧ adequacy 0% < 60%），但**中间命题支持**：Plan IR + 确定性编译显著降低结构性失败（描述性信号，5 vs 5 Fisher 双侧 p≈0.206，非独立显著性）
   - 能力分解：Intent discovery ✅部分 · Program structuring ✅改善 · Data contract closure ✅100% · Executable implementation ❌
   - 报告：`SUCCESS-006-p1-modelcompiler-v0.2.md`（FROZEN）；v0.3 spec DRAFT：`docs/specs/2026-08-19-p1-5b-v0.3-capability-contract-typed-execution-design.md`
+- [x] **P1-5B v0.3 Capability Contract & Typed Execution** ✅ FROZEN / H-C NOT SUPPORTED（2026-08-19，@ `a111486`）
+  - 架构：B（observe，+`csv.inspect_schema`）/ C（enforce，+`csv.aggregate` 运行时 schema 强制）双 prompt + 模式化 allowlist；A = v0.2 frozen traces（不重采样）
+  - 结果（×5/组，`formal-eval-v0.3-results-b|c/`）：**B: Compile 5/5 (100%) · Contract 5/5 · Execute 0/5 · Adequacy 0/5；C: Compile 1/5 (20%) · Contract 1/5 · Execute 0/5 · Adequacy 0/5**
+  - 能力指标：inspect usage B 40% (2/5) / C 20% (1/5)；schema utilization B 50% / C 0%；schema hallucination 0/0 → **N/A**（csv.aggregate 全程 0 采纳，enforcement 未被触发）；code defect B/C 均 14%（全为 `env` NameError）；repair rate A 0.60 → B 2.00 → C 2.80
+  - 失败归因：C 组 4/5 编译失败 = 模型把 `code` 写成对象 `{"path": ...}`（应为 JSON 字符串）→ `CIR schema mismatch: invalid type: map, expected a string`，3 次修复全部重犯（repair prompt 无法纠正序列化契约）；执行层 6 个可运行 run 全部 `env` NameError（v0.2 同一缺陷类，能力契约未触及）
+  - 判定：**H-C NOT SUPPORTED**（C Compile 20% < 80% ∧ Adequacy 0% < 60%）；中间命题（capability contract 提升可靠性）本轮不支持；模型自主使用能力契约亦未观察到（B Adequacy 0%）；命题 B 仍不在本轮范围
+  - 报告：`experiments/p1-5b-cognitive-program-discovery/formal-eval-v0.3-results-b/summary-v0.3.md`
+  - v0.4 建议：prompt 增加显式序列化契约（code 是 JSON 字符串）+ 处理 `env` 缺陷类（Runtime 移除 env 或强化教学），重跑 C ×5
 
 **ACOS 能力图谱（v0.1 实测后）**：
 ```text
@@ -321,10 +329,11 @@ ModelCompiler:      0/1 (编译器失败，LLM 返回空/无效输出)
 
 ### 后续计划
 
-- **P1-5B v0.3: Capability Contract & Typed Execution** 🔬（DRAFT spec 已提交待批准：`docs/specs/2026-08-19-p1-5b-v0.3-capability-contract-typed-execution-design.md`）
+- **P1-5B v0.3: Capability Contract & Typed Execution** ✅ COMPLETE / FROZEN（2026-08-19，H-C NOT SUPPORTED，见上）
   - 核心问题：把模型需要猜的执行细节（runtime 契约 / schema / 列名）从 Prompt 移回 Primitive Contract / Runtime
   - 三层能力模型：High-Level Cognitive Capability → Structured Operation → Low-Level Runtime
-  - 极小因果实验：新增 `csv.inspect_schema`；A（v0.2 frozen control）/ B（+inspect，观察 schema）/ C（schema-aware 强制）
+  - 极小因果实验：新增 `csv.inspect_schema` + `csv.aggregate`；A（v0.2 frozen control）/ B（+inspect，观察 schema）/ C（schema-aware 强制）——结果：B Compile 100% 但 60% 忽略能力；C Compile 20%（code-as-map 序列化契约未内化，修复循环 3 次全部重犯）；执行层 `env` NameError 缺陷类 100% 复现（能力契约未触及）
+- **P1-5B v0.4: 序列化契约 + env 缺陷处理** 🔬 NEXT（建议）：prompt 显式教"code 是 JSON 字符串，运行时解析为对象"+ 提供 inspect→inputBindings→aggregate 范例；处理 `env` 类缺陷（Runtime 移除或强化教学）；重跑 C ×5 复测 Compile/Adequacy
   - 指标：四层 + Schema hallucination rate / Code defect rate / Repair rate
 - Effect System（副作用声明与权限）
 - 经验回路（Phase 3，feature flag `experience-feedback`）

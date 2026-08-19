@@ -47,3 +47,56 @@
 - **H-C NOT SUPPORTED** - C passing supports the Capability Contract intermediate proposition; it does NOT by itself establish Proposition B (end-to-end discovery of executable, adequate Cognitive Programs), which requires validation on more tasks.
 - B reaching Compile >= 80% AND Adequacy >= 60% (False) would support the claim that the model can autonomously use capability contracts (not observed).
 
+
+### Root cause analysis (from traces)
+
+- **C Compile collapse (4/5) - code-as-map serialization error.** In every failed C run the model
+  emitted `"code": {"path": "${item}"}` (object) in the Plan IR instead of the required JSON
+  string form `"code": "{\"path\": \"${item}\"}"`; CIR validation rejected it with
+  `CIR schema mismatch: invalid type: map, expected a string`. All 3 repair attempts per run
+  re-emitted the same shape (repair prompts show the error + excerpt; the model does not learn
+  the string-serialization rule). The C-mode CSV teaching (params described as JSON objects,
+  runtime auto-parse) invites the object form at plan level, which the schema forbids.
+- **B ignore-the-capability:** only 2/5 B plans contain csv.inspect_schema (1 consumed via
+  data-flow binding); 3/5 reproduced the v0.2 plan verbatim (plain execute_python only).
+- **Dominant execution defect unchanged:** all 6 executable runs (B 5/5, C 1/1) failed with
+  `NameError: name 'env' is not defined` in execute_python code - the exact v0.2 defect.
+  Capability contracts targeted schema hallucination, not this class; code defect rate is
+  identical across groups (14%).
+- **csv.aggregate never adopted (0 steps in B and C).** No run attempted the enforcement
+  capability, so runtime schema enforcement was never exercised; schema hallucination
+  rate = 0/0 = N/A as designed.
+- **Repair tax rising without benefit:** repair rate A 0.60 -> B 2.00 -> C 2.80, yet no repair
+  attempt fixed the underlying misconception; repairs were burned on unfixable-under-current-
+  prompt errors, inflating cost (C-005 compile alone: 24.9 min).
+
+### Findings
+
+1. Capability introduction without serialization-level teaching (C) breaks compile (20% vs 80%
+   frozen v0.2); observe-mode introduction (B) preserves compile but is ignored 60% of the time.
+2. The persistent `env[]` misconception (100% of executed failures) is orthogonal to schema
+   hallucination; it requires its own treatment (prompt, runtime, or removal of env).
+3. H-C (Capability Contract Hypothesis): **NOT SUPPORTED** - C Compile 20% < 80% threshold and
+   C Adequacy 0% < 60% threshold. The intermediate proposition (capability contracts
+   meaningfully raise reliability) is not supported by this round; autonomous capability
+   contract use by the model is also not observed (B Adequacy 0%).
+4. Proposition B remains out of scope (requires multi-task validation); this round neither
+   supports nor refutes it.
+
+### Next steps (recommendations for v0.4)
+
+1. Explicit serialization contract in the prompt: "code is a JSON STRING in the plan; at runtime
+   the platform parses it into a params object" + worked example (the smoke-verified
+   inspect -> inputBindings -> aggregate pattern).
+2. Address the env[] defect class directly (runtime removal of env, or stronger teaching);
+   without it Adequacy cannot move regardless of capability contracts.
+3. Re-run C x 5 after prompt fix; re-measure Compile/Adequacy and schema hallucination
+   (expected to become measurable once csv.aggregate is adopted).
+4. Keep A as frozen v0.2 control; do not re-sample.
+
+### Artifacts
+
+- Traces: formal-eval-v0.3-results-b/run-00X.trace.json, formal-eval-v0.3-results-c/run-00X.trace.json
+- Harness: formal-eval-v0.3.ps1 (spec-aligned metrics, ASCII-safe output, -AggregateOnly mode)
+- Spec: docs/specs/2026-08-19-p1-5b-v0.3-capability-contract-typed-execution-design.md (FROZEN)
+- Pipeline smoke (all passed): plan-smoke-v0.3.json via p1-5b-plan-smoke
