@@ -69,11 +69,27 @@
 - [x] 修复 `check_evidence` 移除 `artifact.stored` 硬性要求
 - [x] v0.2 冻结，可开始真实实验
 
-### P1-4 Fixed Workflow Baseline ⬜
+### P1-4 Fixed Workflow Baseline ✅ FROZEN（2026-08-19，Case A）
 
-- [ ] 手写确定性脚本（Python/Rust）
-- [ ] 使用相同 flagship 任务 + 相同验证器
-- [ ] 对比 ACOS vs 手写脚本
+> **RQ**：人工固定程序是否已达到 RuleCompiler 可靠性？ACOS 价值 = 执行架构还是程序编译？
+
+- [x] 实验协议冻结（`docs/specs/2026-08-19-p1-4-fixed-workflow-design.md`，APPROVED → FROZEN）
+- [x] `acos-fixed-workflow` crate + CLI（不生成 CIR、不走 Runtime/Compiler；仅共享 oracle）
+- [x] `workflows/flagship.py`（264 LOC，纯 stdlib，人类编写）+ Fairness Review 通过（§7 清单逐项）
+- [x] **×5 runs 全部 PASSED**（Contract 5/5 · Execute 5/5 · Adequacy 5/5，零方差 ~52ms）
+- [x] 结果：**Case A**（Fixed 5/5 = Rule 5/5）——可靠执行架构价值成立，程序合成仍开放
+- [x] 报告：`SUCCESS-005-p1-fixed-workflow.md`（四方矩阵 + Engineering Cost + Fairness 记录）
+
+**四方矩阵（终态）**：
+
+| System | Program Source | Compile | Contract | Execute | Adequacy |
+|---|---|---|---:|---:|---:|
+| Direct Tool Loop | LLM runtime decisions | N/A | N/A | N/A | 0/5 |
+| Fixed Workflow | Human authored | N/A | 5/5 | 5/5 | 5/5 |
+| RuleCompiler | Rule-generated CIR | 5/5 | 5/5 | 5/5 | 5/5 |
+| ModelCompiler | LLM generated CIR | 1/5 | 1/5 | 0/5 | 0/5 |
+
+> **ACOS 价值判定**：Execution substrate solved / Verification solved / **Program synthesis unsolved**（开放问题 → v0.2 Structured Program Synthesis）
 
 ### P1-5A ModelCompiler Frontend Robustness ✅ FROZEN / PASS
 
@@ -272,7 +288,6 @@ ModelCompiler:      0/1 (编译器失败，LLM 返回空/无效输出)
 
 ### 后续计划
 
-- **P1-4 Fixed Workflow Baseline**（**提前恢复**，先于 ModelCompiler v0.2——回答"该任务是否真的需要 AI 编译"，补全人工显式结构参照）
 - **ModelCompiler v0.2: Structured Program Synthesis**（Task → Task Decomposition → Plan IR → CIR Generation → Contract Validation；三个小实验：A Control Flow Pressure Test / B Two-stage Compiler / C Output Streaming）
 - Effect System（副作用声明与权限）
 - 经验回路（Phase 3，feature flag `experience-feedback`）
