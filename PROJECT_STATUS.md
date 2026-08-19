@@ -131,10 +131,26 @@
   - 范围：OutputSpec/FieldSpec/input_types 全链迁移、R1–R5 契约检查（`crates/acos-compiler/src/contract.rs`）、runtime 点路径 `${a.b.c}`、探针 trace contract 层
   - 验证：`cargo test --workspace` 全绿 + `cargo clippy --workspace --all-targets -- -D warnings` clean
   - **冻结声明**：P1-5B Formal 实验期间不再改动 Phase 1 代码（防止实验条件漂移）
-- [ ] **P1-5B Formal Evaluation** 🔬 NEXT
-  - 指标：`Discovery Success = Compile PASS ∧ Contract PASS ∧ Execute PASS ∧ Adequacy PASS`
-  - 分别报告：Compile / Contract / Execute / Adequacy 成功率、Overall Discovery Success Rate、Repair Rate、平均 Repair Count、Latency、Token Cost
-  - 对比基准：Task Behavioral Requirements + Ground Truth（**不再与 Golden CIR 比结构**）
+- [ ] **P1-5B Formal Evaluation** ✅ COMPLETE（v0.1 有效负结果）
+  - 结果矩阵（15 runs，冻结条件 @ `eb0d9a8`）：
+    | 系统 | Compile | Contract | Execute | Adequacy |
+    |---|---|---:|---:|---:|
+    | RuleCompiler ×5 | 5/5 | N/A | 5/5 | 5/5 |
+    | ModelCompiler ×5 | 1/5 (20%) | 1/5 (20%) | 0/5 | 0/5 |
+    | Direct Tool Loop ×5 | N/A | N/A | N/A | 0/5 |
+  - 失败分类：3× COMPILE_FAILURE（repair 耗尽绑定错误 + 2× JSON 截断）、1× INFRA（网络）、1× EXECUTION_FAILURE（run-005：契约全过、BR 6/7、25 节点零控制流，裸 `pd.read_csv()` 遇真实脏数据 ParserError——**Program Design Failure**，非 Frontend Failure）
+  - Repair 触发 3/5、成功率 0%；Compile 层延迟巨大（最高 30min/run）
+  - **命题 A 支持**（Rule 5/5 vs Baseline 0/5；叠加 P1-R1 Fisher p≈0.0079）；**命题 B 暂不支持**
+  - 官方结论与完整分析：`experiments/p1-5b-cognitive-program-discovery/formal-eval-v0.1-results/report.md`
+  - **v0.2 方向已拍板**：不优化 prompt，改结构化合成（Task → Plan IR → CIR）；P0 Structured Output Reliability / P1 Program Planning / P2 Code Contract（Phase 2）；三个小实验 A/B/C；P1-4 Fixed Workflow 提前
+
+**ACOS 能力图谱（v0.1 实测后）**：
+```text
+Runtime          ✅ control semantics / recovery / contract execution
+Verification     ✅ structural / semantic / contract
+RuleCompiler     ✅ deterministic program synthesis
+ModelCompiler    ⚠️ syntax generation / ⚠️ schema compliance / ❌ reliable program discovery
+```
 
 **P1-5B 过程中的运行时/编译器修复**（P1-5B-A 之外）：
 - [x] `acos-llm`：`max_tokens` 可配置（`ACOS_LLM_MAX_TOKENS`，默认 32768）— 修复 LongCat-2.0 thinking 吞掉输出预算导致空响应
@@ -151,8 +167,8 @@ P1 的核心科学问题被拆分为两个独立命题，分别验证：
 
 | 命题 | 定义 | 验证路径 | 当前状态 |
 |------|------|----------|----------|
-| **A**: 程序化编译 + 可验证执行 > 直接工具调用 | 给定正确的 Cognitive Program，Runtime + Verifier 的执行可靠性高于 LLM 直接调用工具 | RuleCompiler vs Baseline | ✅ 初步支持（P1-R1: 5/5 vs 0/5） |
-| **B**: 编译器能自动发现合理程序结构 | 给定任务描述，ModelCompiler 能生成语义合理的 CIR | ModelCompiler 修复后 vs Ground Truth | ⏳ Probe-2 支持混淆变量判断，待 Formal Discovery Evaluation |
+| **A**: 程序化编译 + 可验证执行 > 直接工具调用 | 给定正确的 Cognitive Program，Runtime + Verifier 的执行可靠性高于 LLM 直接调用工具 | RuleCompiler vs Baseline | ✅ **支持**（P1-R1: 5/5 vs 0/5, p≈0.0079；P1-5B v0.1: 5/5 vs 0/5） |
+| **B**: 编译器能自动发现合理程序结构 | 给定任务描述，ModelCompiler 能生成语义合理的 CIR | ModelCompiler vs Ground Truth | ❌ **暂不支持**（P1-5B v0.1: Compile 1/5 / Execute 0/5 / Adequacy 0/5） |
 
 ### 实验对比矩阵
 
@@ -226,7 +242,7 @@ cargo run -p acos-cli -- run-cir <cir.json> [--env <env.json>] [--verify <ground
 - Baseline 当前使用 flat conversation（非 true multi-turn API），v0.2 足够但长期可改进
 - **ModelCompiler 前端已修复**（P1-5A 完成，FROZEN/PASS）
 - P1-5B Discovery Probe 完成（Probe-1 不支持命题 B；Probe-2 支持"Prompt/Context Contract 是主要混淆变量"的判断，尚不足以单独证明通用 Cognitive Program Discovery；决策走 Formal P1-5B）
-- **Generated-code data contract**：`execute_python` 阶段间无 schema/type 契约（`${all_results}`、`${processed_data}`、key 名、列名假设），`KeyError`/`NameError`/`NoneType.strip` 属此层；作为独立工程问题处理（P1-5B Formal Branch 前置）。**Phase 1 已实施静态契约部分**（编译期 R1–R5：binding 存在性、结构可达性、类型对齐、字段路径、输出 schema 完整性），**Phase 2 structured transport（stdin/JSON/env 结构化传递）待做**
+- **Generated-code data contract**：`execute_python` 阶段间无 schema/type 契约（`${all_results}`、`${processed_data}`、key 名、列名假设），`KeyError`/`NameError`/`NoneType.strip` 属此层；作为独立工程问题处理（P1-5B Formal Branch 前置）。**Phase 1 已实施静态契约部分**（编译期 R1–R5：binding 存在性、结构可达性、类型对齐、字段路径、输出 schema 完整性），**Phase 2 structured transport（stdin/JSON/env 结构化传递）待做**。P1-5B v0.1 进一步定位 **P2：Python 代码语义契约**（`pd.read_csv` 是否容错 dirty CSV / schema inference）——Stage Data Contract 抓不到代码级语义，属 Phase 2 范围
 
 ## 第一轮实验结果（P1-R1，已冻结）
 
@@ -256,7 +272,8 @@ ModelCompiler:      0/1 (编译器失败，LLM 返回空/无效输出)
 
 ### 后续计划
 
-- **P1-4** Fixed Workflow Baseline（等 P1-5B 完成，作为 Expert Workflow Reference）
+- **P1-4 Fixed Workflow Baseline**（**提前恢复**，先于 ModelCompiler v0.2——回答"该任务是否真的需要 AI 编译"，补全人工显式结构参照）
+- **ModelCompiler v0.2: Structured Program Synthesis**（Task → Task Decomposition → Plan IR → CIR Generation → Contract Validation；三个小实验：A Control Flow Pressure Test / B Two-stage Compiler / C Output Streaming）
 - Effect System（副作用声明与权限）
 - 经验回路（Phase 3，feature flag `experience-feedback`）
 - SQLite 持久化存储（Phase 2）
