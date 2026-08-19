@@ -1,0 +1,16 @@
+﻿{
+  "system": "fixed_workflow",
+  "task": "P1-FLAGSHIP-001",
+  "execution_time_ms": 53,
+  "layers": {
+    "contract": true,
+    "execute": true,
+    "adequacy": true
+  },
+  "engineering_cost": {
+    "loc": 264,
+    "author_time_minutes": 45,
+    "nodes": null
+  },
+  "steps": 4
+}
