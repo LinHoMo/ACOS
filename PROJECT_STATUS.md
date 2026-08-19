@@ -4,6 +4,20 @@
 
 架构已收敛为用户空间认知运行时（user-space cognitive runtime），采用编译器/运行时分离（compiler/runtime split）。
 
+**ACOS 研究定位（P1-4 后收敛）**：
+```text
+P0 Runtime Semantics          ✅
+P1-R1 Reliable Execution      ✅
+P1-4 Fixed Workflow           ✅ confirms: Runtime + Verification value
+P1-5A Compiler Robustness     ✅
+P1-5B Direct Task → CIR       ❌ (P1-5B v0.1 有效负结果)
+P1-5B v0.2                    🔬 Structured Program Synthesis
+```
+
+**核心设计原则（三组数据共同支持）**：
+> Program correctness cannot be delegated to the agent that generates the program.
+> （P1-R1 Baseline self-report vs verified · P1-5B valid CIR vs bad execution · P1-4 explicit program vs verification）
+
 **ACOS Mini MVP 已完成并验证**：
 - 9 个核心 Rust crate 实现
 - 认知编译器（规则优先 + Claude 模型辅助）
@@ -90,6 +104,17 @@
 | ModelCompiler | LLM generated CIR | 1/5 | 1/5 | 0/5 | 0/5 |
 
 > **ACOS 价值判定**：Execution substrate solved / Verification solved / **Program synthesis unsolved**（开放问题 → v0.2 Structured Program Synthesis）
+
+**P1-4 Review（用户批准）**：Case A 命中排除"ACOS 比人类更会写程序"的错误解释——ACOS 被验证的是 **Reliable Execution Substrate**，不是 Autonomous Program Discovery。四方矩阵分层：
+
+```text
+Program Generation
+  Human: 5/5 (可靠)
+  RuleCompiler: 5/5 (可靠)
+  ModelCompiler: 0/5 (开放问题)
+Execution
+  Runtime + Verification: Solved
+```
 
 ### P1-5A ModelCompiler Frontend Robustness ✅ FROZEN / PASS
 
@@ -288,7 +313,7 @@ ModelCompiler:      0/1 (编译器失败，LLM 返回空/无效输出)
 
 ### 后续计划
 
-- **ModelCompiler v0.2: Structured Program Synthesis**（Task → Task Decomposition → Plan IR → CIR Generation → Contract Validation；三个小实验：A Control Flow Pressure Test / B Two-stage Compiler / C Output Streaming）
+- **ModelCompiler v0.2: Structured Program Synthesis** 🔬（LLM 生成 intent-level Plan IR → **确定性编译器** → CIR → Contract → Runtime；三个小实验 A/B/C；spec 草稿已提交待批准）
 - Effect System（副作用声明与权限）
 - 经验回路（Phase 3，feature flag `experience-feedback`）
 - SQLite 持久化存储（Phase 2）
