@@ -66,6 +66,43 @@ async fn main() -> Result<(), AcosError> {
             report.print();
             std::process::exit(if report.failed() == 0 { 0 } else { 1 });
         }
+        Some("fixed-workflow") => {
+            let task = positional
+                .get(2)
+                .copied()
+                .expect("usage: acos fixed-workflow <task> [--dataset-dir DIR] [--report-out PATH] [--gt PATH] [--author-time MIN]");
+            let mut dataset_dir = "tests/benchmarks/p1/flagship_csv_quality/datasets".to_string();
+            let mut report_out = "report.md".to_string();
+            let mut gt_path = "tests/benchmarks/p1/flagship_csv_quality/expected/ground_truth.yaml".to_string();
+            let mut author_time = 45u32;
+            let mut i = 3;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--dataset-dir" => { if let Some(v) = args.get(i + 1) { dataset_dir = v.clone(); } i += 2; }
+                    "--report-out" => { if let Some(v) = args.get(i + 1) { report_out = v.clone(); } i += 2; }
+                    "--gt" => { if let Some(v) = args.get(i + 1) { gt_path = v.clone(); } i += 2; }
+                    "--author-time" => { if let Some(v) = args.get(i + 1).and_then(|s| s.parse().ok()) { author_time = v; } i += 2; }
+                    other => {
+                        eprintln!("unknown argument: {other}");
+                        std::process::exit(2);
+                    }
+                }
+            }
+            if task != "P1-FLAGSHIP-001" {
+                eprintln!("unsupported task: {task} (only P1-FLAGSHIP-001)");
+                std::process::exit(2);
+            }
+            match acos_fixed_workflow::run_flagship(&dataset_dir, &report_out, &gt_path, author_time).await {
+                Ok(metrics) => {
+                    println!("{}", acos_fixed_workflow::metrics_to_json(&metrics));
+                    std::process::exit(if metrics.all_passed() { 0 } else { 1 });
+                }
+                Err(e) => {
+                    eprintln!("fixed-workflow failed: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
         Some("baseline") => {
             let goal = positional.get(2).expect("usage: acos baseline <goal> [--verify <gt.yaml>] [--output <path>]");
             let verify_path = match args.iter().position(|a| a == "--verify") {
@@ -115,7 +152,7 @@ async fn main() -> Result<(), AcosError> {
             Ok(())
         }
         _ => {
-            eprintln!("usage: acos <compile|run|run-cir|baseline|bench> [args]");
+            eprintln!("usage: acos <compile|run|run-cir|baseline|fixed-workflow|bench> [args]");
             std::process::exit(1);
         }
     }

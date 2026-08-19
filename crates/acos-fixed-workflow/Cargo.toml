@@ -1,0 +1,19 @@
+[package]
+name = "acos-fixed-workflow"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "ACOS P1-4 fixed workflow baseline: deterministic human-authored execution."
+
+[dependencies]
+acos-core = { path = "../acos-core" }
+acos-state = { path = "../acos-state" }
+acos-verify = { path = "../acos-verify" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "process"] }
+
+[features]
+default = []
