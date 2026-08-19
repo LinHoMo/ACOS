@@ -365,6 +365,8 @@ Common fields:
 - `code`: Python code for `execute_python` steps. It may reference values produced by earlier steps as `${outputName}` (and `${item}` inside a foreach body). The code runs inside the ACOS sandbox with a populated `env`; return values via `env["name"] = value` or plain variable assignment.
 
 __CSV_SECTION__
+__SERIALIZATION_SECTION__
+__INPUTS_SECTION__
 - `inputBindings`: array of `{ "param": <name>, "source": <step name>, "binding": <output name> }` — bind a previous step's output to a parameter.
 - `output`: `{ "name": <unique identifier>, "typeName": <type>, "fields": [ { "name": ..., "typeName": "Number"|"Integer"|"String"|"Boolean"|"List"|"Record"|"Any" } ] }`. `typeName` must be non-empty; use `List<X>` for lists of `X`. `fields` documents record schemas (may be empty).
 - `retry` (retry steps only): `{ "maxAttempts": <>= 2> }`.
@@ -424,15 +426,97 @@ For CSV data, you may inspect the schema first:
   references only the columns it reports.
 "#;
 
+/// P1-5B v0.4 S1/S3: serialization contract teaching (interface only, no
+/// task-specific content — must not become a flagship-task recipe).
+const SERIALIZATION_SECTION: &str = r#"# Primitive parameters (serialization contract)
+
+Every `code` field is ALWAYS a JSON string in the plan — never a JSON object.
+Write it as a JSON-encoded string; the runtime parses the string when it
+interprets the parameters:
+
+- Correct: "code": "print('hello')"
+- Correct: "code": "path = '${item}'\nprint(path)"
+- WRONG (object form, rejected by the compiler): "code": {"path": "${item}"}
+"#;
+
+/// P1-5B v0.4 S2/S3: structured execution bindings (interface only).
+const INPUTS_SECTION: &str = r#"# Execution bindings (structured inputs)
+
+`execute_python` receives its bound inputs as a structured dictionary named
+`inputs` — real Python lists, dicts, and strings. Reference them by the
+parameter name you declared in `inputBindings`:
+
+- "inputBindings": [{"param": "file_path", "source": "...", "binding": "..."}]
+  → in Python: path = inputs["file_path"]
+
+Do NOT use `env` — it is not populated; plans whose code references `env` are
+rejected.
+"#;
+
 /// Builds the planner system prompt for the given experiment mode.
-fn plan_system_prompt(mode: CsvMode) -> String {
+fn plan_system_prompt(mode: CsvMode, serialization_teaching: bool, structured_inputs: bool) -> String {
     let (csv_caps, csv_section) = match mode {
         CsvMode::Enforce => ("csv.inspect_schema, csv.aggregate", CSV_SECTION_ENFORCE),
         CsvMode::Observe => ("csv.inspect_schema", CSV_SECTION_OBSERVE),
     };
+    let serialization_section = if serialization_teaching { SERIALIZATION_SECTION } else { "" };
+    let inputs_section = if structured_inputs { INPUTS_SECTION } else { "" };
     PLAN_SYSTEM_PROMPT
         .replace("__CSV_CAPABILITIES__", csv_caps)
         .replace("__CSV_SECTION__", csv_section)
+        .replace("__SERIALIZATION_SECTION__", serialization_section)
+        .replace("__INPUTS_SECTION__", inputs_section)
+}
+
+/// P1-5B v0.4 S2/S3 binding policy: rejects a plan whose generated code
+/// references the reserved `env` variable (`env[` / `env.`), walking into
+/// foreach/conditional bodies. Returns the offending step name.
+fn enforce_binding_policy(plan: &PlanIR) -> Result<(), String> {
+    if let Some(step_name) = plan_step_uses_env(plan) {
+        return Err(format!(
+            "InvalidPythonBinding: step '{step_name}' code references the reserved `env` variable; \
+             use structured `inputs` via `inputBindings` instead"
+        ));
+    }
+    Ok(())
+}
+
+/// P1-5B v0.4 S2/S3 binding policy: returns the name of the first step whose
+/// generated code references the reserved `env` variable (`env[` or `env.`),
+/// or None. Walked recursively into foreach/conditional bodies.
+fn plan_step_uses_env(plan: &PlanIR) -> Option<String> {
+    fn walk(steps: &[crate::plan::PlanStep]) -> Option<String> {
+        for step in steps {
+            if let Some(code) = &step.code {
+                if code_uses_env(code) {
+                    return Some(step.name.clone());
+                }
+            }
+            if !step.body.is_empty() {
+                if let Some(n) = walk(&step.body) {
+                    return Some(n);
+                }
+            }
+        }
+        None
+    }
+    walk(&plan.steps)
+}
+
+/// Detects `env[` / `env.` references (word-boundary protected) in Python code.
+fn code_uses_env(code: &str) -> bool {
+    let bytes = code.as_bytes();
+    let mut idx = 0usize;
+    while let Some(rel) = code[idx..].find("env") {
+        let i = idx + rel;
+        let before_ok = i == 0 || !(bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_');
+        let after = bytes.get(i + 3).copied();
+        if before_ok && matches!(after, Some(b'[') | Some(b'.')) {
+            return true;
+        }
+        idx = i + 3;
+    }
+    false
 }
 
 // ── ModelCompiler ────────────────────────────────────────────────────────────
@@ -442,6 +526,12 @@ fn plan_system_prompt(mode: CsvMode) -> String {
 pub struct ModelCompiler {
     llm: acos_llm::LongCatClient,
     csv_mode: CsvMode,
+    /// P1-5B v0.4 S1/S3: teach the serialization contract (`code` is a JSON
+    /// string) in the planner prompt.
+    serialization_teaching: bool,
+    /// P1-5B v0.4 S2/S3: teach structured `inputs` and reject `env`
+    /// references in generated code (Structured Inputs Package).
+    structured_inputs: bool,
 }
 
 /// Full trace of a single compile operation (used by P1-5B Discovery Probe).
@@ -508,6 +598,8 @@ impl ModelCompiler {
         Self {
             llm,
             csv_mode: CsvMode::Enforce,
+            serialization_teaching: false,
+            structured_inputs: false,
         }
     }
 
@@ -519,6 +611,17 @@ impl ModelCompiler {
     /// Selects the P1-5B v0.3 CSV capability mode (Observe vs Enforce).
     pub fn set_csv_mode(&mut self, mode: CsvMode) {
         self.csv_mode = mode;
+    }
+
+    /// P1-5B v0.4 S1/S3: enable serialization-contract teaching in the prompt.
+    pub fn set_serialization_teaching(&mut self, on: bool) {
+        self.serialization_teaching = on;
+    }
+
+    /// P1-5B v0.4 S2/S3: enable the Structured Inputs Package (prompt teaching
+    /// + `env` rejection in generated code).
+    pub fn set_structured_inputs(&mut self, on: bool) {
+        self.structured_inputs = on;
     }
 
     /// Builds a **structured Compile Context** prompt from the TaskSpec.
@@ -1008,6 +1111,11 @@ impl ModelCompiler {
         validate_plan_with_allowlist(&plan, self.csv_mode.allowlist())
             .map_err(|message| CompilerError::JsonShapeError { message })?;
 
+        if self.structured_inputs {
+            enforce_binding_policy(&plan)
+                .map_err(|message| CompilerError::JsonShapeError { message })?;
+        }
+
         Ok(plan)
     }
 
@@ -1025,7 +1133,7 @@ impl ModelCompiler {
     ) -> TracedCompile {
         let task_id = task.id;
         let user_prompt = self.build_plan_user_prompt(task);
-        let system_prompt = plan_system_prompt(self.csv_mode);
+        let system_prompt = plan_system_prompt(self.csv_mode, self.serialization_teaching, self.structured_inputs);
         let mut trace = CompileTrace {
             initial_prompt: user_prompt.clone(),
             initial_response: String::new(),
@@ -2206,5 +2314,137 @@ mod tests {
         };
         let acos_err: AcosError = err.into();
         assert!(matches!(acos_err, AcosError::CompilerFailure { .. }));
+    }
+
+    // ── P1-5B v0.4 binding policy ──────────────────────────────────────────
+
+    #[test]
+    fn code_uses_env_detects_env_references() {
+        assert!(code_uses_env("env['x'] = 1"));
+        assert!(code_uses_env("data = env[\"rows\"]"));
+        assert!(code_uses_env("env.merge({})"));
+        assert!(!code_uses_env("print('environment')"));
+        assert!(!code_uses_env("density = 1"));
+        assert!(!code_uses_env("x = 42"));
+        assert!(!code_uses_env("environment = inputs"));
+    }
+
+    #[test]
+    fn plan_step_uses_env_walks_foreach_bodies() {
+        let plan = PlanIR {
+            goal: "g".into(),
+            steps: vec![
+                crate::plan::PlanStep {
+                    name: "outer".into(),
+                    kind: crate::plan::StepKind::Foreach,
+                    description: None,
+                    capability: None,
+                    code: None,
+                    over: Some("inputs".into()),
+                    condition: None,
+                    input_bindings: vec![],
+                    output: None,
+                    body: vec![crate::plan::PlanStep {
+                        name: "inner_py".into(),
+                        kind: crate::plan::StepKind::Primitive,
+                        description: None,
+                        capability: Some("execute_python".into()),
+                        code: Some("env['file'] = '${item}'".into()),
+                        over: None,
+                        condition: None,
+                        input_bindings: vec![],
+                        output: None,
+                        body: vec![],
+                        retry: None,
+                        write_path: None,
+                    }],
+                    retry: None,
+                    write_path: None,
+                },
+                crate::plan::PlanStep {
+                    name: "clean".into(),
+                    kind: crate::plan::StepKind::Primitive,
+                    description: None,
+                    capability: Some("execute_python".into()),
+                    code: Some("print(inputs['x'])".into()),
+                    over: None,
+                    condition: None,
+                    input_bindings: vec![],
+                    output: None,
+                    body: vec![],
+                    retry: None,
+                    write_path: None,
+                },
+            ],
+            data_flow: vec![],
+            control_flow: vec![],
+        };
+        assert_eq!(plan_step_uses_env(&plan).as_deref(), Some("inner_py"));
+    }
+
+    #[test]
+    fn enforce_binding_policy_rejects_env_but_accepts_inputs() {
+        let plan = PlanIR {
+            goal: "g".into(),
+            steps: vec![crate::plan::PlanStep {
+                name: "clean".into(),
+                kind: crate::plan::StepKind::Primitive,
+                description: None,
+                capability: Some("execute_python".into()),
+                code: Some("print(inputs['x'])".into()),
+                over: None,
+                condition: None,
+                input_bindings: vec![],
+                output: None,
+                body: vec![],
+                retry: None,
+                write_path: None,
+            }],
+            data_flow: vec![],
+            control_flow: vec![],
+        };
+        assert!(enforce_binding_policy(&plan).is_ok());
+        let bad = PlanIR {
+            goal: "g".into(),
+            steps: vec![crate::plan::PlanStep {
+                name: "leaky".into(),
+                kind: crate::plan::StepKind::Primitive,
+                description: None,
+                capability: Some("execute_python".into()),
+                code: Some("env['x'] = 1".into()),
+                over: None,
+                condition: None,
+                input_bindings: vec![],
+                output: None,
+                body: vec![],
+                retry: None,
+                write_path: None,
+            }],
+            data_flow: vec![],
+            control_flow: vec![],
+        };
+        let err = enforce_binding_policy(&bad).unwrap_err();
+        assert!(err.contains("InvalidPythonBinding"), "got: {err}");
+        assert!(err.contains("leaky"), "got: {err}");
+    }
+
+    #[test]
+    fn structured_inputs_prompt_contains_sections() {
+        let p_off = plan_system_prompt(CsvMode::Enforce, false, false);
+        assert!(!p_off.contains("serialization contract"));
+        assert!(!p_off.contains("structured inputs"));
+        assert!(!p_off.contains("__SERIALIZATION_SECTION__"));
+        assert!(!p_off.contains("__INPUTS_SECTION__"));
+        let p_s1 = plan_system_prompt(CsvMode::Enforce, true, false);
+        assert!(p_s1.contains("serialization contract"));
+        assert!(p_s1.contains("WRONG (object form"));
+        assert!(!p_s1.contains("structured inputs"));
+        let p_s2 = plan_system_prompt(CsvMode::Enforce, false, true);
+        assert!(!p_s2.contains("serialization contract"));
+        assert!(p_s2.contains("structured inputs"));
+        assert!(p_s2.contains("Do NOT use `env`"));
+        let p_s3 = plan_system_prompt(CsvMode::Enforce, true, true);
+        assert!(p_s3.contains("serialization contract"));
+        assert!(p_s3.contains("structured inputs"));
     }
 }

@@ -247,9 +247,52 @@ impl Primitive for ExecutePythonPrimitive {
                 provider: "execute_python".into(),
             })?;
 
-        let output = tokio::process::Command::new(python)
-            .arg("-c")
-            .arg(code)
+        let mut command = tokio::process::Command::new(python);
+        command.arg("-c");
+        let mut run_code = code.to_string();
+        let mut temp_inputs_path: Option<std::path::PathBuf> = None;
+
+        // P1-5B v0.4 S2/S3: structured inputs transport. When the harness
+        // enables ACOS_STRUCTURED_INPUTS, the node's bound inputs (everything
+        // except `code`) are injected as a real Python `inputs` dict — values
+        // cross stage boundaries as structured data, not source-code
+        // interpolation. Env-var transport with a temp-file fallback for
+        // payloads that would exceed the process environment block limit.
+        if std::env::var("ACOS_STRUCTURED_INPUTS").as_deref() == Ok("1") {
+            let mut inputs_map = serde_json::Map::new();
+            if let Some(obj) = input.payload.as_object() {
+                for (k, v) in obj {
+                    if k != "code" {
+                        inputs_map.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+            let inputs_json =
+                serde_json::to_string(&serde_json::Value::Object(inputs_map)).unwrap_or_else(|_| "{}".into());
+            if inputs_json.len() > 4000 {
+                let path = std::env::temp_dir().join(format!("acos_inputs_{}.json", std::process::id()));
+                std::fs::write(&path, &inputs_json).map_err(|e| AcosError::PrimitiveFailure {
+                    message: format!("failed to stage structured inputs: {e}"),
+                    primitive_id: Some("execute_python".into()),
+                    class: FailureClass::Unknown,
+                })?;
+                temp_inputs_path = Some(path.clone());
+                command.env("ACOS_PYTHON_INPUTS_PATH", &path);
+            } else {
+                command.env("ACOS_PYTHON_INPUTS", &inputs_json);
+            }
+            let prologue = "import os, json\n\
+                if os.environ.get('ACOS_PYTHON_INPUTS_PATH'):\n\
+                \x20   _acos_f = open(os.environ['ACOS_PYTHON_INPUTS_PATH'], encoding='utf-8')\n\
+                \x20   inputs = json.load(_acos_f)\n\
+                \x20   _acos_f.close()\n\
+                else:\n\
+                \x20   inputs = json.loads(os.environ.get('ACOS_PYTHON_INPUTS', '{}'))\n";
+            run_code = format!("{prologue}\n{code}");
+        }
+        command.arg(&run_code);
+
+        let output = command
             .output()
             .await
             .map_err(|e| AcosError::PrimitiveFailure {
@@ -257,6 +300,10 @@ impl Primitive for ExecutePythonPrimitive {
                 primitive_id: Some("execute_python".into()),
                 class: FailureClass::Unknown,
             })?;
+
+        if let Some(path) = temp_inputs_path {
+            std::fs::remove_file(path).ok();
+        }
 
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -913,5 +960,32 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("unknown column"), "got: {err}");
         tokio::fs::remove_dir_all(&dir).await.ok();
+    }
+
+    #[tokio::test]
+    async fn execute_python_injects_structured_inputs_when_enabled() {
+        if !["python3", "python", "py"].iter().any(|c| which(c)) {
+            return;
+        }
+        // Env var is process-global; set before and restore after.
+        let prev = std::env::var("ACOS_STRUCTURED_INPUTS").ok();
+        std::env::set_var("ACOS_STRUCTURED_INPUTS", "1");
+        let out = ExecutePythonPrimitive
+            .invoke(TypedValue {
+                value_type: ValueType::Scalar,
+                payload: serde_json::json!({
+                    "code": "print(inputs['greeting'] + ' ' + inputs['name'])",
+                    "greeting": "hello",
+                    "name": "world"
+                }),
+            })
+            .await
+            .expect("python runs");
+        match prev {
+            Some(v) => std::env::set_var("ACOS_STRUCTURED_INPUTS", v),
+            None => std::env::remove_var("ACOS_STRUCTURED_INPUTS"),
+        }
+        let stdout = out.payload.get("stdout").unwrap().as_str().unwrap();
+        assert_eq!(stdout.trim(), "hello world");
     }
 }

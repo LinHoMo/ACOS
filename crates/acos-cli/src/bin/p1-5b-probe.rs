@@ -63,6 +63,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(2);
         }
     };
+    // P1-5B v0.4 S1–S3 factor switches: serialization teaching (S1/S3) and the
+    // Structured Inputs Package (S2/S3: prompt teaching + env rejection +
+    // runtime `inputs` injection).
+    let serialization_teaching = args.iter().any(|a| a == "--serialization-teaching");
+    let structured_inputs = args.iter().any(|a| a == "--structured-inputs");
+    if structured_inputs {
+        std::env::set_var("ACOS_STRUCTURED_INPUTS", "1");
+    }
 
     if let Err(e) = try_load_env() {
         eprintln!("[warn] .env not loaded: {e}");
@@ -83,6 +91,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  out_dir: {}", out_dir.display());
     println!("  max_repair_attempts: {MAX_REPAIR_ATTEMPTS}");
     println!("  declared_inputs: {}", declared_paths.len());
+    println!(
+        "  v0.4 factors: serialization_teaching={serialization_teaching}, structured_inputs={structured_inputs}"
+    );
     println!();
 
     tokio::fs::create_dir_all(&out_dir).await.ok();
@@ -94,6 +105,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut compiler = ModelCompiler::from_env()
             .map_err(|e| format!("ModelCompiler::from_env failed (set LONGCAT_API_KEY?): {e}"))?;
         compiler.set_csv_mode(csv_mode);
+        compiler.set_serialization_teaching(serialization_teaching);
+        compiler.set_structured_inputs(structured_inputs);
         let traced = if plan_mode {
             compiler.compile_plan_traced(&task_spec, MAX_REPAIR_ATTEMPTS).await
         } else {

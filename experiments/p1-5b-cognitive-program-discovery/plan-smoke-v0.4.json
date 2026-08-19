@@ -1,0 +1,109 @@
+{
+  "goal": "Analyze all quarterly sales CSV files: inspect each file's schema, compute deterministic column aggregates, merge per-file statistics, and generate a consolidated Markdown report with evidence log.",
+  "steps": [
+    {
+      "name": "analyze_each",
+      "kind": "foreach",
+      "description": "process each declared input file",
+      "over": "inputs",
+      "output": {
+        "name": "per_file_results",
+        "typeName": "List<FileStats>",
+        "fields": []
+      },
+      "body": [
+        {
+          "name": "inspect_file",
+          "kind": "primitive",
+          "description": "inspect the CSV schema before aggregating",
+          "capability": "csv.inspect_schema",
+          "code": "{\"path\": \"${item}\"}",
+          "inputBindings": [],
+          "output": {
+            "name": "schema_report",
+            "typeName": "CsvSchemaReport",
+            "fields": []
+          }
+        },
+        {
+          "name": "aggregate_file",
+          "kind": "primitive",
+          "description": "deterministic column aggregation (schema from inspected report)",
+          "capability": "csv.aggregate",
+          "code": "{\"path\": \"${item}\"}",
+          "inputBindings": [
+            {
+              "param": "columns",
+              "source": "inspect_file",
+              "binding": "schema_report"
+            }
+          ],
+          "output": {
+            "name": "file_stats",
+            "typeName": "FileStats",
+            "fields": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "merge_report",
+      "kind": "primitive",
+      "description": "merge per-file statistics into the consolidated report",
+      "capability": "execute_python",
+      "code": "import json\ndata = inputs[\"per_file_results\"]\nresults = []\nfor item in data:\n    try:\n        results.append(json.loads(item.get(\"stdout\", \"{}\") or \"{}\"))\n    except Exception:\n        pass\nlines = []\nlines.append(\"# P1 Flagship CSV Quality Report\")\nlines.append(\"\")\nlines.append(\"## data_quality\")\nfor r in results:\n    lines.append(\"### \" + r.get(\"file\", \"?\") + \" (\" + r.get(\"file\", \"?\") + \")\")\n    lines.append(\"- Rows: \" + str(r.get(\"row_count\", 0)))\n    if r.get(\"issues\"):\n        lines.append(\"- Issues: \" + str(len(r[\"issues\"])))\n        for issue in r[\"issues\"]:\n            lines.append(\"  - \" + issue)\n    else:\n        lines.append(\"- Issues: 0 (clean)\")\n    lines.append(\"\")\nlines.append(\"## quarterly_summary\")\nfor r in results:\n    fname = r.get(\"file\", \"?\")\n    q_name = fname[:-4].rsplit(\"_\", 1)[-1] if \"_\" in fname else fname\n    cols = {c[\"name\"]: c[\"sum\"] for c in r.get(\"columns\", [])}\n    revenue = cols.get(\"revenue\", cols.get(\"sales\", 0))\n    lines.append(\"- \" + q_name + \" revenue: {:.2f}\".format(revenue))\nlines.append(\"\")\nlines.append(\"## anomalies\")\nlines.append(\"- No anomalies detected\")\nlines.append(\"\")\nlines.append(\"## recovery_log\")\nfor r in results:\n    lines.append(\"- \" + r.get(\"file\", \"?\") + \": dropped \" + str(r.get(\"dropped_rows\", 0)) + \" row(s) (NULL values / duplicates)\")\nlines.append(\"\")\nfiles_with_issues = sum(1 for r in results if r.get(\"issues\"))\ntotal_issues = sum(len(r.get(\"issues\", [])) for r in results)\ngrand_total = round(sum(({c[\"name\"]: c[\"sum\"] for c in r.get(\"columns\", [])}).get(\"revenue\", ({c[\"name\"]: c[\"sum\"] for c in r.get(\"columns\", [])}).get(\"sales\", 0)) for r in results), 2)\nlines.append(\"## Aggregate\")\nlines.append(\"- Total files processed: \" + str(len(results)))\nlines.append(\"- Files with issues: \" + str(files_with_issues))\nlines.append(\"- Total issues found: \" + str(total_issues))\nlines.append(\"- Grand total revenue: {:.2f}\".format(grand_total))\nlines.append(\"\")\nprint(\"\\n\".join(lines))",
+      "inputBindings": [
+        {
+          "param": "per_file_results",
+          "source": "analyze_each",
+          "binding": "per_file_results"
+        }
+      ],
+      "output": {
+        "name": "report_record",
+        "typeName": "Report",
+        "fields": []
+      }
+    },
+    {
+      "name": "write_report",
+      "kind": "primitive",
+      "description": "persist the consolidated report artifact",
+      "capability": "write_file",
+      "writePath": "p1_flagship_report.md",
+      "code": null,
+      "inputBindings": [
+        {
+          "param": "content",
+          "source": "merge_report",
+          "binding": "report_record"
+        }
+      ],
+      "output": {
+        "name": "report_ref",
+        "typeName": "ArtifactRef",
+        "fields": []
+      }
+    }
+  ],
+  "dataFlow": [
+    {
+      "fromStep": "analyze_each",
+      "toStep": "merge_report",
+      "binding": "per_file_results"
+    },
+    {
+      "fromStep": "merge_report",
+      "toStep": "write_report",
+      "binding": "report_record"
+    }
+  ],
+  "controlFlow": [
+    {
+      "step": "analyze_each",
+      "kind": "foreach",
+      "over": "inputs",
+      "condition": null
+    }
+  ]
+}
