@@ -10,6 +10,27 @@
 
 > v0.2 首次证明"编译层"有效：`Task → Plan IR → 确定性编译器 → CIR` 把 v0.1 的 Program Design Failure（20% Compile）提升到 80% Compile / 80% Contract / 100% binding 闭合；失败前沿从**程序结构**（控制流/数据流/绑定）转移到**模型生成的步骤代码质量**（运行时环境契约与数据 schema 未知）。
 
+**正式结论（用户批准表述）**：
+
+> P1-5B v0.2 不支持命题 B，但支持一个更小的中间命题：引入 intent-level Plan IR + 确定性 Plan→CIR 编译，显著降低了直接生成 CIR 时的结构性失败；然而端到端任务完成率仍为 0/5，因此"自动发现可执行且充分的 Cognitive Program"仍未成立。
+
+**能力分解（v0.2 实测）**：
+
+```text
+Intent discovery            ✅ 部分存在（Control Intent Recall 67%）
+Program structuring         ✅ 明显改善（Compile 20% → 80%）
+Data contract closure       ✅ 100%（Plan binding closure 20/20）
+Executable implementation   ❌（模型不满足 Primitive 运行时契约）
+```
+
+因此**本报告不支持"ModelCompiler 不会规划"的结论**。更准确的表述是：ModelCompiler 当前已具备一定的 intent-level program synthesis 能力（发现任务步骤、组织 foreach、绑定引用闭合），但尚不能稳定生成满足底层 Primitive 运行契约的可执行认知程序。Program Discovery 没有归零。
+
+## 统计严谨性声明
+
+- Compile 20% → 80%（1/5 → 4/5）是**有价值的描述性架构信号**（改变的是计算模型——intent 层 + 确定性编译——而非模型措辞）。
+- 但样本为 5 vs 5，4/5 对 1/5 的 Fisher 双侧精确检验 p≈0.206——**不是独立的统计显著性证据**。禁止据此宣称 "Compile improvement is statistically significant"。
+- 所有层率（Compile/Contract/Execute/Adequacy、Plan 指标）均为描述性观测，供方向性判断使用。
+
 ## 结果矩阵（v0.2 vs 冻结 v0.1）
 
 | System | Program Source | Compile | Contract | Execute | Adequacy |
@@ -90,4 +111,8 @@ powershell -ExecutionPolicy Bypass -File experiments/p1-5b-cognitive-program-dis
 
 - **Execution substrate / Verification**：已解（v0.1 定论，未重跑）。
 - **Program synthesis**：仍未解，但**首次出现结构性进展**——"中间认知结构 + 确定性编译"把失败层级从"程序设计"推后到"步骤代码"。
-- **v0.3 方向**（spec §6 判定分支 + 失败归因）：Plan 层已验证器 + **execute_python 运行时契约与 schema 探测的教学**（prompt 内教 `${...}` 插值、header 探测、无预置全局）；或把步骤代码收窄为编译器模板/受限 DSL。
+- **真正的瓶颈**：`execute_python` primitive 太"宽"——一个 primitive 要求模型同时理解 Python runtime 契约、数据 schema、列名、异常处理、模板插值。这指向的 v0.3 不是"Prompt 教学版"，而是 **Capability Contract & Typed Execution**（`docs/specs/2026-08-19-p1-5b-v0.3-capability-contract-typed-execution-design.md`，DRAFT）：把模型需要猜的执行细节从 Prompt 移回 Primitive Contract / Runtime，用 `csv.inspect_schema` 这类极小 primitive 做因果实验（模型猜 schema vs capability 提供 schema）。
+
+## 冻结声明
+
+本报告冻结（`7a3b36a` + 本次修订 commit）。历史数据（trace / summary）不再修改。

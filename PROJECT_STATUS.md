@@ -11,7 +11,8 @@ P1-R1 Reliable Execution      ✅
 P1-4 Fixed Workflow           ✅ confirms: Runtime + Verification value
 P1-5A Compiler Robustness     ✅
 P1-5B Direct Task → CIR       ❌ (P1-5B v0.1 有效负结果)
-P1-5B v0.2                    🔬 Structured Program Synthesis
+P1-5B v0.2                    ✅ FROZEN / NOT SUPPORTED（中间命题支持：Plan IR 架构方向有效）
+P1-5B v0.3                    🔬 NEXT: Capability Contract & Typed Execution
 ```
 
 **核心设计原则（三组数据共同支持）**：
@@ -183,7 +184,14 @@ Execution
   - Repair 触发 3/5、成功率 0%；Compile 层延迟巨大（最高 30min/run）
   - **命题 A 支持**（Rule 5/5 vs Baseline 0/5；叠加 P1-R1 Fisher p≈0.0079）；**命题 B 暂不支持**
   - 官方结论与完整分析：`experiments/p1-5b-cognitive-program-discovery/formal-eval-v0.1-results/report.md`
-  - **v0.2 方向已拍板**：不优化 prompt，改结构化合成（Task → Plan IR → CIR）；P0 Structured Output Reliability / P1 Program Planning / P2 Code Contract（Phase 2）；三个小实验 A/B/C；P1-4 Fixed Workflow 提前
+- [x] **P1-5B v0.2 Structured Program Synthesis** ✅ FROZEN / NOT SUPPORTED（2026-08-19，@ `7a3b36a`）
+  - 架构：Task → LLM → **Plan IR**（intent 层）→ **确定性编译器**（total function）→ CIR → 契约（内建）→ Runtime
+  - 结果（×5，`formal-eval-v0.2-results/`）：**Compile 4/5 (80%) · Contract 4/5 · Execute 0/5 · Adequacy 0/5**（vs v0.1 Compile 1/5）
+  - Plan 指标：Control Intent Recall 67%（采纳 4/6）· Plan completeness 33% · Control coverage 40% · **binding closure 20/20 = 100%**
+  - 失败归因：run-001 condition 语法非法（`$` token）；run-002/004 生成代码引用未定义 `env`；run-003 裸 `item`（应 `${item}`）；run-005 pandas `KeyError: 'quantity'`（未探测 header 硬编码列名）——**全部为模型生成的 `execute_python` 步骤代码质量**，编译器/契约零运行时缺陷
+  - 判定：命题 B NOT SUPPORTED（comp 33% < 70% ∧ adequacy 0% < 60%），但**中间命题支持**：Plan IR + 确定性编译显著降低结构性失败（描述性信号，5 vs 5 Fisher 双侧 p≈0.206，非独立显著性）
+  - 能力分解：Intent discovery ✅部分 · Program structuring ✅改善 · Data contract closure ✅100% · Executable implementation ❌
+  - 报告：`SUCCESS-006-p1-modelcompiler-v0.2.md`（FROZEN）；v0.3 spec DRAFT：`docs/specs/2026-08-19-p1-5b-v0.3-capability-contract-typed-execution-design.md`
 
 **ACOS 能力图谱（v0.1 实测后）**：
 ```text
@@ -209,7 +217,7 @@ P1 的核心科学问题被拆分为两个独立命题，分别验证：
 | 命题 | 定义 | 验证路径 | 当前状态 |
 |------|------|----------|----------|
 | **A**: 程序化编译 + 可验证执行 > 直接工具调用 | 给定正确的 Cognitive Program，Runtime + Verifier 的执行可靠性高于 LLM 直接调用工具 | RuleCompiler vs Baseline | ✅ **支持**（P1-R1: 5/5 vs 0/5, p≈0.0079；P1-5B v0.1: 5/5 vs 0/5） |
-| **B**: 编译器能自动发现合理程序结构 | 给定任务描述，ModelCompiler 能生成语义合理的 CIR | ModelCompiler vs Ground Truth | ❌ **暂不支持**（P1-5B v0.1: Compile 1/5 / Execute 0/5 / Adequacy 0/5） |
+| **B**: 编译器能自动发现合理程序结构 | 给定任务描述，ModelCompiler 能生成语义合理的 CIR | ModelCompiler vs Ground Truth | ❌ **暂不支持**（P1-5B v0.1: Compile 1/5 / Execute 0/5 / Adequacy 0/5；v0.2: Compile 4/5 但 Execute 0/5 / Adequacy 0/5——中间命题支持：Plan IR 方向有效，见 SUCCESS-006） |
 
 ### 实验对比矩阵
 
@@ -313,7 +321,11 @@ ModelCompiler:      0/1 (编译器失败，LLM 返回空/无效输出)
 
 ### 后续计划
 
-- **ModelCompiler v0.2: Structured Program Synthesis** 🔬（LLM 生成 intent-level Plan IR → **确定性编译器** → CIR → Contract → Runtime；三个小实验 A/B/C；spec 草稿已提交待批准）
+- **P1-5B v0.3: Capability Contract & Typed Execution** 🔬（DRAFT spec 已提交待批准：`docs/specs/2026-08-19-p1-5b-v0.3-capability-contract-typed-execution-design.md`）
+  - 核心问题：把模型需要猜的执行细节（runtime 契约 / schema / 列名）从 Prompt 移回 Primitive Contract / Runtime
+  - 三层能力模型：High-Level Cognitive Capability → Structured Operation → Low-Level Runtime
+  - 极小因果实验：新增 `csv.inspect_schema`；A（v0.2 frozen control）/ B（+inspect，观察 schema）/ C（schema-aware 强制）
+  - 指标：四层 + Schema hallucination rate / Code defect rate / Repair rate
 - Effect System（副作用声明与权限）
 - 经验回路（Phase 3，feature flag `experience-feedback`）
 - SQLite 持久化存储（Phase 2）
