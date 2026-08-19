@@ -1,0 +1,518 @@
+{
+  "behavioral_analysis": {
+    "binding_matched": 4,
+    "binding_total": 4,
+    "checks": [
+      {
+        "detail": "4/4 declared paths referenced",
+        "name": "BR-1 Multi-File Processing",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "analysis caps: {\"write_file\", \"read_file\", \"execute_python\"}",
+        "name": "BR-2 Data Quality Analysis",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "conditions=0, python=true",
+        "name": "BR-3 Anomaly Detection/Repair",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "write_file present",
+        "name": "BR-4 Structured Report",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "25 nodes, 24 primitives",
+        "name": "BR-5 Evidence/Audit Trail",
+        "verdict": "PASS"
+      },
+      {
+        "detail": "0 loops, 0 conds, 0 retries",
+        "name": "BR-6 Control Flow Complexity",
+        "verdict": "FAIL"
+      },
+      {
+        "detail": "all paths declared",
+        "name": "BR-7 No Hallucinated Resources",
+        "verdict": "PASS"
+      }
+    ],
+    "condition_count": 0,
+    "loop_count": 0,
+    "node_count": 25,
+    "pass_count": 6,
+    "primitive_count": 24,
+    "retry_count": 0
+  },
+  "contract": {
+    "error": null,
+    "pass": true
+  },
+  "execution": {
+    "error": "provider failure: no python interpreter found on PATH (provider=\"execute_python\")",
+    "ok": false
+  },
+  "input": {
+    "prompt_sent": "Compile the following ACOS task into a CIR execution graph.\n\n# Task Goal\n\nAnalyze all quarterly sales CSV files in the dataset directory. For each file: detect data-quality issues (schema drift, type errors, missing values, duplicates, outliers); repair recoverable issues; revalidate repaired inputs; compute quarterly statistics; merge results; run a quality review; and generate a consolidated Markdown report with an evidence log.\n\n# Input Bindings (AUTHORITATIVE — use these exact paths)\n\nThe following input files are declared by the task and MUST be used:\n\n1. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv\", format=\"csv\"\n2. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv\", format=\"csv\"\n3. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv\", format=\"csv\"\n4. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv\", format=\"csv\"\n\n# Required Outputs\n\nThe CIR MUST produce:\n\n- type=\"Report\", format=\"markdown\"\n\n# Constraints\n\n\n# Optimization: primary=\"reliability\", secondary=\"cost\"\n\n# Approval: externalSideEffects=\"required\"\n\n# Full TaskSpec (reference JSON)\n\n```json\n{\n  \"apiVersion\": \"acos.io/v1\",\n  \"id\": \"fd3f5a5e-1b0a-4b1e-8c7a-9e2d4f6a8b01\",\n  \"goal\": \"Analyze all quarterly sales CSV files in the dataset directory. For each file: detect data-quality issues (schema drift, type errors, missing values, duplicates, outliers); repair recoverable issues; revalidate repaired inputs; compute quarterly statistics; merge results; run a quality review; and generate a consolidated Markdown report with an evidence log.\",\n  \"inputs\": [\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv\",\n      \"format\": \"csv\"\n    },\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv\",\n      \"format\": \"csv\"\n    },\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv\",\n      \"format\": \"csv\"\n    },\n    {\n      \"type\": \"File\",\n      \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv\",\n      \"format\": \"csv\"\n    }\n  ],\n  \"outputs\": [\n    {\n      \"type\": \"Report\",\n      \"format\": \"markdown\"\n    }\n  ],\n  \"constraints\": {\n    \"timeoutSeconds\": null,\n    \"maxCost\": null,\n    \"allowedNetwork\": null\n  },\n  \"optimization\": {\n    \"primary\": \"reliability\",\n    \"secondary\": \"cost\"\n  },\n  \"approval\": {\n    \"externalSideEffects\": \"required\"\n  }\n}\n```\n",
+    "task_spec_path": "tests/benchmarks/p1/flagship_csv_quality/acos_task.yaml"
+  },
+  "output": {
+    "final_cir": {
+      "effects": [
+        {
+          "description": "read quarterly sales CSV files",
+          "kind": "fs_read",
+          "reversible": true
+        },
+        {
+          "description": "write consolidated markdown report",
+          "kind": "fs_write",
+          "reversible": true
+        },
+        {
+          "description": "execute Python data processing scripts",
+          "kind": "process_spawn",
+          "reversible": true
+        }
+      ],
+      "entry": [
+        "root"
+      ],
+      "id": "64d09386-afe7-466f-b3a4-65bec302d50a",
+      "nodes": [
+        {
+          "capability": null,
+          "children": [
+            "read_q1",
+            "read_q2",
+            "read_q3",
+            "read_q4",
+            "detect_q1",
+            "detect_q2",
+            "detect_q3",
+            "detect_q4",
+            "repair_q1",
+            "repair_q2",
+            "repair_q3",
+            "repair_q4",
+            "revalidate_q1",
+            "revalidate_q2",
+            "revalidate_q3",
+            "revalidate_q4",
+            "stats_q1",
+            "stats_q2",
+            "stats_q3",
+            "stats_q4",
+            "merge",
+            "quality_review",
+            "generate_report",
+            "write_report"
+          ],
+          "elseChildren": [],
+          "inputs": {},
+          "kind": "sequence",
+          "nodeId": "root"
+        },
+        {
+          "capability": "read_file",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "path": "tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "read_q1",
+          "output": {
+            "fields": [],
+            "name": "raw_q1",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "read_file",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "path": "tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "read_q2",
+          "output": {
+            "fields": [],
+            "name": "raw_q2",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "read_file",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "path": "tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "read_q3",
+          "output": {
+            "fields": [],
+            "name": "raw_q3",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "read_file",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "path": "tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "read_q4",
+          "output": {
+            "fields": [],
+            "name": "raw_q4",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import pandas as pd, json; from io import StringIO; df=pd.read_csv(StringIO('''${raw_q1}''')); print(json.dumps({'schema_drift':[c for c in df.columns if c not in ['date','product','quantity','price','total']],'missing':df.isnull().sum().to_dict(),'duplicates':int(df.duplicated().sum()),'type_errors':[{'col':c} for c in ['quantity','price','total'] if c in df.columns and not pd.api.types.is_numeric_dtype(df[c])],'outliers':[]}))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "detect_q1",
+          "output": {
+            "fields": [],
+            "name": "issues_q1",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import pandas as pd, json; from io import StringIO; df=pd.read_csv(StringIO('''${raw_q2}''')); print(json.dumps({'schema_drift':[c for c in df.columns if c not in ['date','product','quantity','price','total']],'missing':df.isnull().sum().to_dict(),'duplicates':int(df.duplicated().sum()),'type_errors':[{'col':c} for c in ['quantity','price','total'] if c in df.columns and not pd.api.types.is_numeric_dtype(df[c])],'outliers':[]}))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "detect_q2",
+          "output": {
+            "fields": [],
+            "name": "issues_q2",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import pandas as pd, json; from io import StringIO; df=pd.read_csv(StringIO('''${raw_q3}''')); print(json.dumps({'schema_drift':[c for c in df.columns if c not in ['date','product','quantity','price','total']],'missing':df.isnull().sum().to_dict(),'duplicates':int(df.duplicated().sum()),'type_errors':[{'col':c} for c in ['quantity','price','total'] if c in df.columns and not pd.api.types.is_numeric_dtype(df[c])],'outliers':[]}))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "detect_q3",
+          "output": {
+            "fields": [],
+            "name": "issues_q3",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import pandas as pd, json; from io import StringIO; df=pd.read_csv(StringIO('''${raw_q4}''')); print(json.dumps({'schema_drift':[c for c in df.columns if c not in ['date','product','quantity','price','total']],'missing':df.isnull().sum().to_dict(),'duplicates':int(df.duplicated().sum()),'type_errors':[{'col':c} for c in ['quantity','price','total'] if c in df.columns and not pd.api.types.is_numeric_dtype(df[c])],'outliers':[]}))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "detect_q4",
+          "output": {
+            "fields": [],
+            "name": "issues_q4",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import pandas as pd, json; from io import StringIO; raw='''${raw_q1}'''; issues=json.loads('''${issues_q1}'''); df=pd.read_csv(StringIO(raw)); log=[]; drift=issues.get('schema_drift',[]); [log.append('removed column '+c) or df.drop(columns=[c],inplace=True) for c in drift if c in df.columns]; d=df.duplicated().sum(); df.drop_duplicates(inplace=True); log.append('removed '+str(d)+' duplicates'); m=df.isnull().sum().sum(); df.fillna(0,inplace=True); log.append('filled '+str(m)+' missing values'); print(json.dumps({'data':df.to_csv(index=False),'log':log}))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "repair_q1",
+          "output": {
+            "fields": [],
+            "name": "repaired_q1",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import pandas as pd, json; from io import StringIO; raw='''${raw_q2}'''; issues=json.loads('''${issues_q2}'''); df=pd.read_csv(StringIO(raw)); log=[]; drift=issues.get('schema_drift',[]); [log.append('removed column '+c) or df.drop(columns=[c],inplace=True) for c in drift if c in df.columns]; d=df.duplicated().sum(); df.drop_duplicates(inplace=True); log.append('removed '+str(d)+' duplicates'); m=df.isnull().sum().sum(); df.fillna(0,inplace=True); log.append('filled '+str(m)+' missing values'); print(json.dumps({'data':df.to_csv(index=False),'log':log}))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "repair_q2",
+          "output": {
+            "fields": [],
+            "name": "repaired_q2",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import pandas as pd, json; from io import StringIO; raw='''${raw_q3}'''; issues=json.loads('''${issues_q3}'''); df=pd.read_csv(StringIO(raw)); log=[]; drift=issues.get('schema_drift',[]); [log.append('removed column '+c) or df.drop(columns=[c],inplace=True) for c in drift if c in df.columns]; d=df.duplicated().sum(); df.drop_duplicates(inplace=True); log.append('removed '+str(d)+' duplicates'); m=df.isnull().sum().sum(); df.fillna(0,inplace=True); log.append('filled '+str(m)+' missing values'); print(json.dumps({'data':df.to_csv(index=False),'log':log}))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "repair_q3",
+          "output": {
+            "fields": [],
+            "name": "repaired_q3",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import pandas as pd, json; from io import StringIO; raw='''${raw_q4}'''; issues=json.loads('''${issues_q4}'''); df=pd.read_csv(StringIO(raw)); log=[]; drift=issues.get('schema_drift',[]); [log.append('removed column '+c) or df.drop(columns=[c],inplace=True) for c in drift if c in df.columns]; d=df.duplicated().sum(); df.drop_duplicates(inplace=True); log.append('removed '+str(d)+' duplicates'); m=df.isnull().sum().sum(); df.fillna(0,inplace=True); log.append('filled '+str(m)+' missing values'); print(json.dumps({'data':df.to_csv(index=False),'log':log}))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "repair_q4",
+          "output": {
+            "fields": [],
+            "name": "repaired_q4",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import pandas as pd, json; from io import StringIO; r=json.loads('''${repaired_q1}'''); df=pd.read_csv(StringIO(r['data'])); print(json.dumps({'schema_ok':all(c in df.columns for c in ['date','product','quantity','price','total']),'no_nulls':int(df.isnull().sum().sum())==0,'no_duplicates':int(df.duplicated().sum())==0,'rows':len(df)}))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "revalidate_q1",
+          "output": {
+            "fields": [],
+            "name": "revalidation_q1",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import pandas as pd, json; from io import StringIO; r=json.loads('''${repaired_q2}'''); df=pd.read_csv(StringIO(r['data'])); print(json.dumps({'schema_ok':all(c in df.columns for c in ['date','product','quantity','price','total']),'no_nulls':int(df.isnull().sum().sum())==0,'no_duplicates':int(df.duplicated().sum())==0,'rows':len(df)}))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "revalidate_q2",
+          "output": {
+            "fields": [],
+            "name": "revalidation_q2",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import pandas as pd, json; from io import StringIO; r=json.loads('''${repaired_q3}'''); df=pd.read_csv(StringIO(r['data'])); print(json.dumps({'schema_ok':all(c in df.columns for c in ['date','product','quantity','price','total']),'no_nulls':int(df.isnull().sum().sum())==0,'no_duplicates':int(df.duplicated().sum())==0,'rows':len(df)}))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "revalidate_q3",
+          "output": {
+            "fields": [],
+            "name": "revalidation_q3",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import pandas as pd, json; from io import StringIO; r=json.loads('''${repaired_q4}'''); df=pd.read_csv(StringIO(r['data'])); print(json.dumps({'schema_ok':all(c in df.columns for c in ['date','product','quantity','price','total']),'no_nulls':int(df.isnull().sum().sum())==0,'no_duplicates':int(df.duplicated().sum())==0,'rows':len(df)}))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "revalidate_q4",
+          "output": {
+            "fields": [],
+            "name": "revalidation_q4",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import pandas as pd, json; from io import StringIO; r=json.loads('''${repaired_q1}'''); df=pd.read_csv(StringIO(r['data'])); print(json.dumps({'revenue':float(df['total'].sum()) if 'total' in df.columns else 0,'quantity':int(df['quantity'].sum()) if 'quantity' in df.columns else 0,'avg_price':float(df['price'].mean()) if 'price' in df.columns else 0,'transactions':len(df),'quarter':'Q1'}))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "stats_q1",
+          "output": {
+            "fields": [],
+            "name": "stats_q1",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import pandas as pd, json; from io import StringIO; r=json.loads('''${repaired_q2}'''); df=pd.read_csv(StringIO(r['data'])); print(json.dumps({'revenue':float(df['total'].sum()) if 'total' in df.columns else 0,'quantity':int(df['quantity'].sum()) if 'quantity' in df.columns else 0,'avg_price':float(df['price'].mean()) if 'price' in df.columns else 0,'transactions':len(df),'quarter':'Q2'}))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "stats_q2",
+          "output": {
+            "fields": [],
+            "name": "stats_q2",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import pandas as pd, json; from io import StringIO; r=json.loads('''${repaired_q3}'''); df=pd.read_csv(StringIO(r['data'])); print(json.dumps({'revenue':float(df['total'].sum()) if 'total' in df.columns else 0,'quantity':int(df['quantity'].sum()) if 'quantity' in df.columns else 0,'avg_price':float(df['price'].mean()) if 'price' in df.columns else 0,'transactions':len(df),'quarter':'Q3'}))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "stats_q3",
+          "output": {
+            "fields": [],
+            "name": "stats_q3",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import pandas as pd, json; from io import StringIO; r=json.loads('''${repaired_q4}'''); df=pd.read_csv(StringIO(r['data'])); print(json.dumps({'revenue':float(df['total'].sum()) if 'total' in df.columns else 0,'quantity':int(df['quantity'].sum()) if 'quantity' in df.columns else 0,'avg_price':float(df['price'].mean()) if 'price' in df.columns else 0,'transactions':len(df),'quarter':'Q4'}))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "stats_q4",
+          "output": {
+            "fields": [],
+            "name": "stats_q4",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import json; s=[json.loads('''${stats_q1}'''),json.loads('''${stats_q2}'''),json.loads('''${stats_q3}'''),json.loads('''${stats_q4}''')]; i=[json.loads('''${issues_q1}'''),json.loads('''${issues_q2}'''),json.loads('''${issues_q3}'''),json.loads('''${issues_q4}''')]; r=[json.loads('''${repaired_q1}''')['log'],json.loads('''${repaired_q2}''')['log'],json.loads('''${repaired_q3}''')['log'],json.loads('''${repaired_q4}''')['log']]; v=[json.loads('''${revalidation_q1}'''),json.loads('''${revalidation_q2}'''),json.loads('''${revalidation_q3}'''),json.loads('''${revalidation_q4}''')]; print(json.dumps({'quarterly_stats':s,'issues':i,'repair_logs':r,'validations':v}))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "merge",
+          "output": {
+            "fields": [],
+            "name": "merged",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import json; m=json.loads('''${merged}'''); review={'total_revenue':sum(q['revenue'] for q in m['quarterly_stats']),'total_quantity':sum(q['quantity'] for q in m['quarterly_stats']),'total_transactions':sum(q['transactions'] for q in m['quarterly_stats']),'all_valid':all(v['schema_ok'] and v['no_nulls'] and v['no_duplicates'] for v in m['validations']),'quarters_reviewed':len(m['quarterly_stats']),'total_issues_found':sum(len(iss['schema_drift'])+iss['duplicates'] for iss in m['issues']),'total_repairs':sum(len(log) for log in m['repair_logs'])}; print(json.dumps(review))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "quality_review",
+          "output": {
+            "fields": [],
+            "name": "review",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "execute_python",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "code": "import json; m=json.loads('''${merged}'''); r=json.loads('''${review}'''); lines=['# Quarterly Sales Quality Report','','## Executive Summary','Total Revenue: $' + str(round(r['total_revenue'],2)),'Total Quantity: ' + str(r['total_quantity']),'Total Transactions: ' + str(r['total_transactions']),'All Validations Passed: ' + str(r['all_valid']),'Quarters Reviewed: ' + str(r['quarters_reviewed']),'Total Issues Found: ' + str(r['total_issues_found']),'Total Repairs Applied: ' + str(r['total_repairs']),'','## Quarterly Breakdown']; [lines.extend(['### ' + q['quarter'],'- Revenue: $' + str(round(q['revenue'],2)),'- Quantity: ' + str(q['quantity']),'- Avg Price: $' + str(round(q['avg_price'],2)),'- Transactions: ' + str(q['transactions']),'']) for q in m['quarterly_stats']]; lines.extend(['## Evidence Log','','### Data Quality Issues by Quarter']); [lines.extend(['#### Q' + str(i+1),'Schema Drift: ' + str(iss['schema_drift']),'Missing Values: ' + str(iss['missing']),'Duplicates Found: ' + str(iss['duplicates']),'Type Errors: ' + str(iss['type_errors']),'']) for i,iss in enumerate(m['issues'])]; lines.extend(['### Validation Results by Quarter']); [lines.extend(['#### Q' + str(i+1),'Schema OK: ' + str(v['schema_ok']),'No Nulls: ' + str(v['no_nulls']),'No Duplicates: ' + str(v['no_duplicates']),'Row Count: ' + str(v['rows']),'']) for i,v in enumerate(m['validations'])]; lines.extend(['### Repair Log by Quarter']); [lines.extend(['#### Q' + str(i+1)] + ['- ' + entry for entry in log] + ['']) for i,log in enumerate(m['repair_logs'])]; print('\\n'.join(lines))"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "generate_report",
+          "output": {
+            "fields": [],
+            "name": "report_content",
+            "typeName": "String"
+          }
+        },
+        {
+          "capability": "write_file",
+          "children": [],
+          "elseChildren": [],
+          "inputs": {
+            "content": "${report_content}",
+            "path": "report.md"
+          },
+          "kind": "primitive_invocation",
+          "nodeId": "write_report",
+          "output": {
+            "fields": [],
+            "name": "report_ref",
+            "typeName": "String"
+          }
+        }
+      ],
+      "taskId": "fd3f5a5e-1b0a-4b1e-8c7a-9e2d4f6a8b01"
+    },
+    "initial_parse_error": null,
+    "initial_raw_response": "```json\n{\n  \"id\": \"b8c4e5f6-a7b8-9012-cdef-345678901234\",\n  \"taskId\": \"fd3f5a5e-1b0a-4b1e-8c7a-9e2d4f6a8b01\",\n  \"entry\": [\"root\"],\n  \"nodes\": [\n    {\n      \"kind\": \"sequence\",\n      \"nodeId\": \"root\",\n      \"capability\": null,\n      \"output\": null,\n      \"children\": [\"read_q1\", \"read_q2\", \"read_q3\", \"read_q4\", \"detect_q1\", \"detect_q2\", \"detect_q3\", \"detect_q4\", \"repair_q1\", \"repair_q2\", \"repair_q3\", \"repair_q4\", \"revalidate_q1\", \"revalidate_q2\", \"revalidate_q3\", \"revalidate_q4\", \"stats_q1\", \"stats_q2\", \"stats_q3\", \"stats_q4\", \"merge\", \"quality_review\", \"generate_report\", \"write_report\"],\n      \"inputs\": {}\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"read_q1\",\n      \"capability\": \"read_file\",\n      \"output\": { \"name\": \"raw_q1\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"read_q2\",\n      \"capability\": \"read_file\",\n      \"output\": { \"name\": \"raw_q2\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"read_q3\",\n      \"capability\": \"read_file\",\n      \"output\": { \"name\": \"raw_q3\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"read_q4\",\n      \"capability\": \"read_file\",\n      \"output\": { \"name\": \"raw_q4\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"path\": \"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"detect_q1\",\n      \"capability\": \"execute_python\",\n      \"output\": { \"name\": \"issues_q1\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"code\": \"import pandas as pd, json; from io import StringIO; df=pd.read_csv(StringIO('''${raw_q1}''')); print(json.dumps({'schema_drift':[c for c in df.columns if c not in ['date','product','quantity','price','total']],'missing':df.isnull().sum().to_dict(),'duplicates':int(df.duplicated().sum()),'type_errors':[{'col':c} for c in ['quantity','price','total'] if c in df.columns and not pd.api.types.is_numeric_dtype(df[c])],'outliers':[]}))\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"detect_q2\",\n      \"capability\": \"execute_python\",\n      \"output\": { \"name\": \"issues_q2\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"code\": \"import pandas as pd, json; from io import StringIO; df=pd.read_csv(StringIO('''${raw_q2}''')); print(json.dumps({'schema_drift':[c for c in df.columns if c not in ['date','product','quantity','price','total']],'missing':df.isnull().sum().to_dict(),'duplicates':int(df.duplicated().sum()),'type_errors':[{'col':c} for c in ['quantity','price','total'] if c in df.columns and not pd.api.types.is_numeric_dtype(df[c])],'outliers':[]}))\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"detect_q3\",\n      \"capability\": \"execute_python\",\n      \"output\": { \"name\": \"issues_q3\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"code\": \"import pandas as pd, json; from io import StringIO; df=pd.read_csv(StringIO('''${raw_q3}''')); print(json.dumps({'schema_drift':[c for c in df.columns if c not in ['date','product','quantity','price','total']],'missing':df.isnull().sum().to_dict(),'duplicates':int(df.duplicated().sum()),'type_errors':[{'col':c} for c in ['quantity','price','total'] if c in df.columns and not pd.api.types.is_numeric_dtype(df[c])],'outliers':[]}))\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"detect_q4\",\n      \"capability\": \"execute_python\",\n      \"output\": { \"name\": \"issues_q4\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"code\": \"import pandas as pd, json; from io import StringIO; df=pd.read_csv(StringIO('''${raw_q4}''')); print(json.dumps({'schema_drift':[c for c in df.columns if c not in ['date','product','quantity','price','total']],'missing':df.isnull().sum().to_dict(),'duplicates':int(df.duplicated().sum()),'type_errors':[{'col':c} for c in ['quantity','price','total'] if c in df.columns and not pd.api.types.is_numeric_dtype(df[c])],'outliers':[]}))\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"repair_q1\",\n      \"capability\": \"execute_python\",\n      \"output\": { \"name\": \"repaired_q1\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"code\": \"import pandas as pd, json; from io import StringIO; raw='''${raw_q1}'''; issues=json.loads('''${issues_q1}'''); df=pd.read_csv(StringIO(raw)); log=[]; drift=issues.get('schema_drift',[]); [log.append('removed column '+c) or df.drop(columns=[c],inplace=True) for c in drift if c in df.columns]; d=df.duplicated().sum(); df.drop_duplicates(inplace=True); log.append('removed '+str(d)+' duplicates'); m=df.isnull().sum().sum(); df.fillna(0,inplace=True); log.append('filled '+str(m)+' missing values'); print(json.dumps({'data':df.to_csv(index=False),'log':log}))\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"repair_q2\",\n      \"capability\": \"execute_python\",\n      \"output\": { \"name\": \"repaired_q2\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"code\": \"import pandas as pd, json; from io import StringIO; raw='''${raw_q2}'''; issues=json.loads('''${issues_q2}'''); df=pd.read_csv(StringIO(raw)); log=[]; drift=issues.get('schema_drift',[]); [log.append('removed column '+c) or df.drop(columns=[c],inplace=True) for c in drift if c in df.columns]; d=df.duplicated().sum(); df.drop_duplicates(inplace=True); log.append('removed '+str(d)+' duplicates'); m=df.isnull().sum().sum(); df.fillna(0,inplace=True); log.append('filled '+str(m)+' missing values'); print(json.dumps({'data':df.to_csv(index=False),'log':log}))\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"repair_q3\",\n      \"capability\": \"execute_python\",\n      \"output\": { \"name\": \"repaired_q3\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"code\": \"import pandas as pd, json; from io import StringIO; raw='''${raw_q3}'''; issues=json.loads('''${issues_q3}'''); df=pd.read_csv(StringIO(raw)); log=[]; drift=issues.get('schema_drift',[]); [log.append('removed column '+c) or df.drop(columns=[c],inplace=True) for c in drift if c in df.columns]; d=df.duplicated().sum(); df.drop_duplicates(inplace=True); log.append('removed '+str(d)+' duplicates'); m=df.isnull().sum().sum(); df.fillna(0,inplace=True); log.append('filled '+str(m)+' missing values'); print(json.dumps({'data':df.to_csv(index=False),'log':log}))\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"repair_q4\",\n      \"capability\": \"execute_python\",\n      \"output\": { \"name\": \"repaired_q4\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"code\": \"import pandas as pd, json; from io import StringIO; raw='''${raw_q4}'''; issues=json.loads('''${issues_q4}'''); df=pd.read_csv(StringIO(raw)); log=[]; drift=issues.get('schema_drift',[]); [log.append('removed column '+c) or df.drop(columns=[c],inplace=True) for c in drift if c in df.columns]; d=df.duplicated().sum(); df.drop_duplicates(inplace=True); log.append('removed '+str(d)+' duplicates'); m=df.isnull().sum().sum(); df.fillna(0,inplace=True); log.append('filled '+str(m)+' missing values'); print(json.dumps({'data':df.to_csv(index=False),'log':log}))\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"revalidate_q1\",\n      \"capability\": \"execute_python\",\n      \"output\": { \"name\": \"revalidation_q1\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"code\": \"import pandas as pd, json; from io import StringIO; r=json.loads('''${repaired_q1}'''); df=pd.read_csv(StringIO(r['data'])); print(json.dumps({'schema_ok':all(c in df.columns for c in ['date','product','quantity','price','total']),'no_nulls':int(df.isnull().sum().sum())==0,'no_duplicates':int(df.duplicated().sum())==0,'rows':len(df)}))\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"revalidate_q2\",\n      \"capability\": \"execute_python\",\n      \"output\": { \"name\": \"revalidation_q2\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"code\": \"import pandas as pd, json; from io import StringIO; r=json.loads('''${repaired_q2}'''); df=pd.read_csv(StringIO(r['data'])); print(json.dumps({'schema_ok':all(c in df.columns for c in ['date','product','quantity','price','total']),'no_nulls':int(df.isnull().sum().sum())==0,'no_duplicates':int(df.duplicated().sum())==0,'rows':len(df)}))\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"revalidate_q3\",\n      \"capability\": \"execute_python\",\n      \"output\": { \"name\": \"revalidation_q3\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"code\": \"import pandas as pd, json; from io import StringIO; r=json.loads('''${repaired_q3}'''); df=pd.read_csv(StringIO(r['data'])); print(json.dumps({'schema_ok':all(c in df.columns for c in ['date','product','quantity','price','total']),'no_nulls':int(df.isnull().sum().sum())==0,'no_duplicates':int(df.duplicated().sum())==0,'rows':len(df)}))\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"revalidate_q4\",\n      \"capability\": \"execute_python\",\n      \"output\": { \"name\": \"revalidation_q4\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"code\": \"import pandas as pd, json; from io import StringIO; r=json.loads('''${repaired_q4}'''); df=pd.read_csv(StringIO(r['data'])); print(json.dumps({'schema_ok':all(c in df.columns for c in ['date','product','quantity','price','total']),'no_nulls':int(df.isnull().sum().sum())==0,'no_duplicates':int(df.duplicated().sum())==0,'rows':len(df)}))\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"stats_q1\",\n      \"capability\": \"execute_python\",\n      \"output\": { \"name\": \"stats_q1\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"code\": \"import pandas as pd, json; from io import StringIO; r=json.loads('''${repaired_q1}'''); df=pd.read_csv(StringIO(r['data'])); print(json.dumps({'revenue':float(df['total'].sum()) if 'total' in df.columns else 0,'quantity':int(df['quantity'].sum()) if 'quantity' in df.columns else 0,'avg_price':float(df['price'].mean()) if 'price' in df.columns else 0,'transactions':len(df),'quarter':'Q1'}))\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"stats_q2\",\n      \"capability\": \"execute_python\",\n      \"output\": { \"name\": \"stats_q2\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"code\": \"import pandas as pd, json; from io import StringIO; r=json.loads('''${repaired_q2}'''); df=pd.read_csv(StringIO(r['data'])); print(json.dumps({'revenue':float(df['total'].sum()) if 'total' in df.columns else 0,'quantity':int(df['quantity'].sum()) if 'quantity' in df.columns else 0,'avg_price':float(df['price'].mean()) if 'price' in df.columns else 0,'transactions':len(df),'quarter':'Q2'}))\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"stats_q3\",\n      \"capability\": \"execute_python\",\n      \"output\": { \"name\": \"stats_q3\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"code\": \"import pandas as pd, json; from io import StringIO; r=json.loads('''${repaired_q3}'''); df=pd.read_csv(StringIO(r['data'])); print(json.dumps({'revenue':float(df['total'].sum()) if 'total' in df.columns else 0,'quantity':int(df['quantity'].sum()) if 'quantity' in df.columns else 0,'avg_price':float(df['price'].mean()) if 'price' in df.columns else 0,'transactions':len(df),'quarter':'Q3'}))\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"stats_q4\",\n      \"capability\": \"execute_python\",\n      \"output\": { \"name\": \"stats_q4\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"code\": \"import pandas as pd, json; from io import StringIO; r=json.loads('''${repaired_q4}'''); df=pd.read_csv(StringIO(r['data'])); print(json.dumps({'revenue':float(df['total'].sum()) if 'total' in df.columns else 0,'quantity':int(df['quantity'].sum()) if 'quantity' in df.columns else 0,'avg_price':float(df['price'].mean()) if 'price' in df.columns else 0,'transactions':len(df),'quarter':'Q4'}))\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"merge\",\n      \"capability\": \"execute_python\",\n      \"output\": { \"name\": \"merged\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"code\": \"import json; s=[json.loads('''${stats_q1}'''),json.loads('''${stats_q2}'''),json.loads('''${stats_q3}'''),json.loads('''${stats_q4}''')]; i=[json.loads('''${issues_q1}'''),json.loads('''${issues_q2}'''),json.loads('''${issues_q3}'''),json.loads('''${issues_q4}''')]; r=[json.loads('''${repaired_q1}''')['log'],json.loads('''${repaired_q2}''')['log'],json.loads('''${repaired_q3}''')['log'],json.loads('''${repaired_q4}''')['log']]; v=[json.loads('''${revalidation_q1}'''),json.loads('''${revalidation_q2}'''),json.loads('''${revalidation_q3}'''),json.loads('''${revalidation_q4}''')]; print(json.dumps({'quarterly_stats':s,'issues':i,'repair_logs':r,'validations':v}))\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"quality_review\",\n      \"capability\": \"execute_python\",\n      \"output\": { \"name\": \"review\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"code\": \"import json; m=json.loads('''${merged}'''); review={'total_revenue':sum(q['revenue'] for q in m['quarterly_stats']),'total_quantity':sum(q['quantity'] for q in m['quarterly_stats']),'total_transactions':sum(q['transactions'] for q in m['quarterly_stats']),'all_valid':all(v['schema_ok'] and v['no_nulls'] and v['no_duplicates'] for v in m['validations']),'quarters_reviewed':len(m['quarterly_stats']),'total_issues_found':sum(len(iss['schema_drift'])+iss['duplicates'] for iss in m['issues']),'total_repairs':sum(len(log) for log in m['repair_logs'])}; print(json.dumps(review))\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"generate_report\",\n      \"capability\": \"execute_python\",\n      \"output\": { \"name\": \"report_content\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"code\": \"import json; m=json.loads('''${merged}'''); r=json.loads('''${review}'''); lines=['# Quarterly Sales Quality Report','','## Executive Summary','Total Revenue: $' + str(round(r['total_revenue'],2)),'Total Quantity: ' + str(r['total_quantity']),'Total Transactions: ' + str(r['total_transactions']),'All Validations Passed: ' + str(r['all_valid']),'Quarters Reviewed: ' + str(r['quarters_reviewed']),'Total Issues Found: ' + str(r['total_issues_found']),'Total Repairs Applied: ' + str(r['total_repairs']),'','## Quarterly Breakdown']; [lines.extend(['### ' + q['quarter'],'- Revenue: $' + str(round(q['revenue'],2)),'- Quantity: ' + str(q['quantity']),'- Avg Price: $' + str(round(q['avg_price'],2)),'- Transactions: ' + str(q['transactions']),'']) for q in m['quarterly_stats']]; lines.extend(['## Evidence Log','','### Data Quality Issues by Quarter']); [lines.extend(['#### Q' + str(i+1),'Schema Drift: ' + str(iss['schema_drift']),'Missing Values: ' + str(iss['missing']),'Duplicates Found: ' + str(iss['duplicates']),'Type Errors: ' + str(iss['type_errors']),'']) for i,iss in enumerate(m['issues'])]; lines.extend(['### Validation Results by Quarter']); [lines.extend(['#### Q' + str(i+1),'Schema OK: ' + str(v['schema_ok']),'No Nulls: ' + str(v['no_nulls']),'No Duplicates: ' + str(v['no_duplicates']),'Row Count: ' + str(v['rows']),'']) for i,v in enumerate(m['validations'])]; lines.extend(['### Repair Log by Quarter']); [lines.extend(['#### Q' + str(i+1)] + ['- ' + entry for entry in log] + ['']) for i,log in enumerate(m['repair_logs'])]; print('\\\\n'.join(lines))\" }\n    },\n    {\n      \"kind\": \"primitive_invocation\",\n      \"nodeId\": \"write_report\",\n      \"capability\": \"write_file\",\n      \"output\": { \"name\": \"report_ref\", \"typeName\": \"String\", \"fields\": [] },\n      \"children\": [],\n      \"inputs\": { \"path\": \"report.md\", \"content\": \"${report_content}\" }\n    }\n  ],\n  \"effects\": [\n    { \"kind\": \"fs_read\", \"description\": \"read quarterly sales CSV files\", \"reversible\": true },\n    { \"kind\": \"fs_write\", \"description\": \"write consolidated markdown report\", \"reversible\": true },\n    { \"kind\": \"process_spawn\", \"description\": \"execute Python data processing scripts\", \"reversible\": true }\n  ]\n}\n```",
+    "repair_count": 0,
+    "repair_traces": []
+  },
+  "program_metrics": {
+    "capability_types": [
+      "execute_python",
+      "read_file",
+      "write_file"
+    ],
+    "condition_count": 0,
+    "control_node_count": 0,
+    "loop_count": 0,
+    "node_count": 25,
+    "primitive_count": 24,
+    "retry_count": 0
+  },
+  "repair_tax": {
+    "first_pass_success": true,
+    "repair_attempts_used": 0,
+    "repair_latency_ms": 0
+  },
+  "run": {
+    "compile_success": true,
+    "final_error": null,
+    "model": "LongCat-2.0",
+    "run_index": 5,
+    "timestamp": "2026-09-05T00:38:17Z"
+  },
+  "timing": {
+    "initial_llm_ms": 472343,
+    "repair_llm_ms": 0,
+    "total_compile_ms": 472344,
+    "total_wall_ms": 472739
+  }
+}

@@ -1,0 +1,6 @@
+{
+    "compile":  "pass",
+    "execute":  "pass",
+    "adequacy":  "passed",
+    "raw":  "Run 4ece1181-6f2d-4bb4-872f-09bbb90d31e8: Completed\r\nArtifacts: [\"report.md\"]\r\nEvidence: 6 items\r\nVerification: PASSED\r\n"
+}
