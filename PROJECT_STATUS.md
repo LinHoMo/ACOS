@@ -200,6 +200,13 @@ Execution
   - 判定：**H-C NOT SUPPORTED**（C Compile 20% < 80% ∧ Adequacy 0% < 60%）；中间命题（capability contract 提升可靠性）本轮不支持；模型自主使用能力契约亦未观察到（B Adequacy 0%）；命题 B 仍不在本轮范围
   - 报告：`experiments/p1-5b-cognitive-program-discovery/formal-eval-v0.3-results-b/summary-v0.3.md`
   - v0.4 建议：prompt 增加显式序列化契约（code 是 JSON 字符串）+ 处理 `env` 缺陷类（Runtime 移除 env 或强化教学），重跑 C ×5
+- [x] **P1-5B v0.4 Serialization Contract & Structured Inputs** ✅ FROZEN / H-S SUPPORTED · H-E INCONCLUSIVE（2026-08-20）
+  - 设计：S0（v0.3 C frozen control）/ S1（+序列化教学）/ S2（+结构化 inputs：注入+教学+env 拒绝）/ S3（+两者）四组因子矩阵；spec `docs/specs/2026-08-19-p1-5b-v0.4-primitive-invocation-contract-structured-inputs-design.md`
+  - 结果（S1–S3 = deepseek-v4-flash via SenseNova；S0 = LongCat-2.0 frozen，跨模型混杂已记录）：**S1 Compile 5/5 (100%) · Contract 5/5 · serialization_failure_rate 0%（S0 80%）→ H-S SUPPORTED；S2 Compile 1/5，env_failure 0/1 · env_persistence 0/1 但 n=1 → H-E INCONCLUSIVE（仅机制级证据）；S3 Compile 0/5（5/5 模型层空响应）→ 交互不可判定（provider/quota/429 混杂）**
+  - 关键证据：S1 中 code-as-map 零复现（v0.3 C 曾 4/5 且 3 次 repair 全部重犯）；S2 run-003 采纳 `inputs[]`、final plan 零 env、失败为真实程序 bug（TypeError: unhashable list）；S1 执行层 5/5 仍 `env` NameError（教学不解决绑定，独立失败类）
+  - 瓶颈收敛：从"CIR 编译"推进到"Primitive Invocation 最后一公里（implementation binding）"
+  - 报告：`experiments/p1-5b-cognitive-program-discovery/summary-v0.4.md`（FROZEN）；S1 提交 `3194f9f`；S2/S3 traces 未追踪保留
+  - 下一步：不补跑；如需重测 S3 → 另立 v0.4-R2（冻结模型/供应商/额度/Prompt/温度/超时）；研究目标 = Primitive Invocation 机器可约束接口（模型只选 capability+arguments，不拼 Python）
 
 **ACOS 能力图谱（v0.1 实测后）**：
 ```text
@@ -249,6 +256,8 @@ P1 的核心科学问题被拆分为两个独立命题，分别验证：
 - 先证明组件独立工作，再对比
 - 测量语义成功（semantic success），而非仅执行成功
 - 命题 A 和命题 B 分别报告，不混为一谈
+- **Provider / Model / Quota / Rate-limit / 网络 = 实验条件，不是基础设施噪声**（v0.4 起生效）：任何涉及模型供应商、模型版本、API 配额、限流、网络的变化，必须进入实验 metadata；跨条件对比只能作为混杂记录，不能作为因果证据；需要复测的实验必须冻结全部实验条件（如 v0.4-R2 立项规则）
+- **凭据卫生**：任何报告、日志、trace、提交与消息中禁止出现原始 API key / 明文密钥；只允许 `KEY_PRESENT=true` 或脱敏标识；`.env` 永不提交（git-ignored）
 
 ## 环境配置 / Configuration
 
@@ -333,8 +342,9 @@ ModelCompiler:      0/1 (编译器失败，LLM 返回空/无效输出)
   - 核心问题：把模型需要猜的执行细节（runtime 契约 / schema / 列名）从 Prompt 移回 Primitive Contract / Runtime
   - 三层能力模型：High-Level Cognitive Capability → Structured Operation → Low-Level Runtime
   - 极小因果实验：新增 `csv.inspect_schema` + `csv.aggregate`；A（v0.2 frozen control）/ B（+inspect，观察 schema）/ C（schema-aware 强制）——结果：B Compile 100% 但 60% 忽略能力；C Compile 20%（code-as-map 序列化契约未内化，修复循环 3 次全部重犯）；执行层 `env` NameError 缺陷类 100% 复现（能力契约未触及）
-- **P1-5B v0.4: 序列化契约 + env 缺陷处理** 🔬 NEXT（建议）：prompt 显式教"code 是 JSON 字符串，运行时解析为对象"+ 提供 inspect→inputBindings→aggregate 范例；处理 `env` 类缺陷（Runtime 移除或强化教学）；重跑 C ×5 复测 Compile/Adequacy
-  - 指标：四层 + Schema hallucination rate / Code defect rate / Repair rate
+- **P1-5B v0.4: 序列化契约 + 结构化 inputs** ✅ COMPLETE / FROZEN（2026-08-20，H-S SUPPORTED / H-E INCONCLUSIVE / S3 交互不可判定，见上）
+  - 指标：serialization_failure_rate S0 80% → S1 0%；env_failure/persistence S2 0/1（n=1）；repair rate S1 0.8 / S2 2.4 / S3 3.0
+  - 下一步：不补跑；S3 重测需 v0.4-R2（冻结全部实验条件）；研究目标 = **Primitive Invocation 机器可约束接口**（capability+arguments 选择，模型不再拼 Python）
 - Effect System（副作用声明与权限）
 - 经验回路（Phase 3，feature flag `experience-feedback`）
 - SQLite 持久化存储（Phase 2）
