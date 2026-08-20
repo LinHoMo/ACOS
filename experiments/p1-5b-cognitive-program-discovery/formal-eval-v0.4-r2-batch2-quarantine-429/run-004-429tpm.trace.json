@@ -1,0 +1,73 @@
+{
+  "behavioral_analysis": null,
+  "contract": {
+    "error": "compile failed",
+    "pass": false
+  },
+  "execution": null,
+  "input": {
+    "prompt_sent": "Produce an execution plan for the following ACOS task.\n\n# Task Goal\n\nAnalyze all quarterly sales CSV files in the dataset directory. For each file: detect data-quality issues (schema drift, type errors, missing values, duplicates, outliers); repair recoverable issues; revalidate repaired inputs; compute quarterly statistics; merge results; run a quality review; and generate a consolidated Markdown report with an evidence log.\n\n# Declared Inputs (for awareness only)\n\nThe task declares these input files; your plan MUST NOT embed any path — use `\"over\": \"inputs\"` for per-file processing:\n\n1. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q1.csv\", format=\"csv\"\n2. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q2.csv\", format=\"csv\"\n3. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q3.csv\", format=\"csv\"\n4. type=\"File\", path=\"tests/benchmarks/p1/flagship_csv_quality/datasets/sales_q4.csv\", format=\"csv\"\n\n# Required Outputs\n\nThe plan MUST produce:\n\n- type=\"Report\", format=\"markdown\"\n\n# Constraints\n\n\n# Instructions\n\nThink through the task's required operations (detection, repair, validation, aggregation, reporting) and express them as plan steps. Return ONLY the plan JSON.",
+    "task_spec_path": "tests/benchmarks/p1/flagship_csv_quality/acos_task.yaml"
+  },
+  "metadata": {
+    "environment": {
+      "clock_sanity_check": "verified-offset--125s",
+      "clock_utc": 1787206554,
+      "os": "windows",
+      "timezone": "system-local"
+    },
+    "experiment": {
+      "commit": "25ab3c381b94f2ab235a1aa9180b02d589bb711e",
+      "max_tokens": "32768",
+      "model": "deepseek-v4-flash",
+      "provider": "openai",
+      "temperature": "0.0",
+      "timeout_seconds": "600"
+    },
+    "limits": {
+      "observed_events": [
+        429
+      ],
+      "quota_status": "ok",
+      "rate_limit_status": 1
+    },
+    "security": {
+      "key_present": true,
+      "raw_key_persisted": false
+    }
+  },
+  "output": {
+    "final_cir": null,
+    "final_plan": null,
+    "initial_parse_error": null,
+    "initial_raw_response": "",
+    "repair_count": 0,
+    "repair_traces": []
+  },
+  "plan_metrics": null,
+  "program_metrics": null,
+  "repair_tax": {
+    "first_pass_success": true,
+    "repair_attempts_used": 0,
+    "repair_latency_ms": 0
+  },
+  "run": {
+    "compile_success": false,
+    "final_error": "external system failure: LLM API error 429 Too Many Requests: {\"error\":{\"message\":\"inference tpm exhausted\",\"type\":\"invalid_request_error\",\"code\":\"429001\"}} (system=Some(\"openai\"))",
+    "mode": "cir",
+    "model": "deepseek-v4-flash",
+    "run_index": 4,
+    "timestamp": "2026-08-20T06:15:54Z"
+  },
+  "timing": {
+    "initial_llm_ms": 0,
+    "repair_llm_ms": 0,
+    "total_compile_ms": 246,
+    "total_wall_ms": 247
+  },
+  "usage": {
+    "completion_tokens": 0,
+    "prompt_tokens": 0,
+    "total_tokens": 0
+  }
+}

@@ -212,7 +212,8 @@ Execution
   - **Batch 1（归档 `experiments/p1-5b-cognitive-program-discovery/formal-eval-v0.4-r2-batch1/`，不可修改）**：Control n=1 可计数（compile/contract PASS、execute FAIL SyntaxError、env_persistence 100%、binding 0%——复现 S1 签名，仅 n=1 不作统计）；Treatment n=0。**H-E INCONCLUSIVE（Treatment n=0 due to provider quota exhaustion; not testable in Batch 1）**，判定为 INVALID / INFRA-CONFOUNDED，不用于 H-E 推断
   - **INFRA-001**：会话级 `LONGCAT_API_KEY`（legacy ak_）覆盖 `.env` SenseNova key（sk_）→ 全线 401 code 16；启动时清除会话变量后恢复（零代码改动）；已记录 key_present=true / raw_key_persisted=false
   - **INFRA-002**：run-001 消耗 32,847 tokens 后 `429001 inference tpm exhausted` → 剩余 19 run 全部 external；当前 provider quota regime 不支持连续 20 个 32k-token run（与 v0.4 S3/S1 同类混杂）；未改 max_tokens/模型/Prompt/harness
-  - **Batch 2（PENDING）**：条件 = credential_source 正确 + quota preflight PASS + clock sanity verified；分块调度（Control 5 → 检查 → Control 5 → Treatment 5 → 检查 → Treatment 5），每块检查 observed_events 后再继续；判定门按冻结 spec 不变
+  - **Batch 2（PENDING，quota 阻塞）**：Chunk 1（Control 1–5）于 2026-08-20 14:15 UTC 尝试 → **5/5 external**（429 tpm exhausted ×4 + 429 rpm exhausted code 8 ×1，新错误类）；preflight 小调用通过但首个真实规模调用立即 429 → 当前 quota regime 对实验规模调用预算≈0，**未启动正式 Batch 2**；隔离样本 `formal-eval-v0.4-r2-batch2-quarantine-429/`（v0.4 `s1-quarantine-402` 先例）；启动门更新：须先以单个实验规模调用探通（非微小 completion）再启动；判定门按冻结 spec 不变
+  - **时钟发现（INFRA-003）**：w32tm NTP 被网络阻断（UDP 123 超时）→ harness 记 unverified；改用 HTTPS Date 头 + 网关 `created` 时间戳双源交叉验证：**主机时钟慢 ~125s**；已以 `ACOS_EXP_CLOCK_SANITY=verified-offset--125s` 记录入 run metadata
 
 **ACOS 能力图谱（v0.1 实测后）**：
 ```text
