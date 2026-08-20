@@ -10,6 +10,8 @@
 
 #![warn(missing_docs)]
 
+use std::time::Duration;
+
 use acos_core::error::AcosError;
 use serde::{Deserialize, Serialize};
 
@@ -141,6 +143,41 @@ pub struct ChatResponse {
     pub text: String,
     /// Tool calls requested by the LLM (empty if none).
     pub tool_calls: Vec<LlmToolCall>,
+    /// Token usage reported by the provider (0 when absent).
+    pub usage: TokenUsage,
+}
+
+/// Token usage reported by the LLM provider.
+///
+/// Normalized from Anthropic (`input_tokens`/`output_tokens`) and
+/// OpenAI-compatible (`prompt_tokens`/`completion_tokens`/`total_tokens`)
+/// usage blocks. Any missing field defaults to 0.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TokenUsage {
+    /// Tokens in the request (prompt / input).
+    pub prompt_tokens: u64,
+    /// Tokens in the response (completion / output).
+    pub completion_tokens: u64,
+    /// Total tokens across the exchange (0 if the provider omits it).
+    pub total_tokens: u64,
+}
+
+impl TokenUsage {
+    fn from_anthropic(u: &Usage) -> Self {
+        Self {
+            prompt_tokens: u.input_tokens,
+            completion_tokens: u.output_tokens,
+            total_tokens: u.input_tokens + u.output_tokens,
+        }
+    }
+
+    fn from_openai(u: &Usage) -> Self {
+        Self {
+            prompt_tokens: u.prompt_tokens,
+            completion_tokens: u.completion_tokens,
+            total_tokens: u.total_tokens,
+        }
+    }
 }
 
 impl ChatResponse {
@@ -164,6 +201,9 @@ struct MessagesRequest {
     /// Tool definitions (optional).
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<ToolDefinition>>,
+    /// Sampling temperature (optional).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f64>,
 }
 
 /// Request body for `POST /chat/completions` (OpenAI-compatible).
@@ -174,6 +214,8 @@ struct ChatCompletionsRequest {
     messages: Vec<OpenAiMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<OpenAiToolDef>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f64>,
 }
 
 /// A message in the OpenAI Chat Completions format.
@@ -205,6 +247,28 @@ struct OpenAiFunction {
 #[derive(Debug, Deserialize)]
 struct ChatCompletionsResponse {
     choices: Vec<ChatCompletionChoice>,
+    /// Token usage (optional).
+    #[serde(default)]
+    usage: Option<Usage>,
+}
+
+/// Token usage block from the provider.
+///
+/// Both Anthropic (`input_tokens`/`output_tokens`) and OpenAI-compatible
+/// (`prompt_tokens`/`completion_tokens`/`total_tokens`) shapes are accepted;
+/// only the fields present in the response are populated.
+#[derive(Debug, Deserialize, Default)]
+struct Usage {
+    #[serde(default)]
+    input_tokens: u64,
+    #[serde(default)]
+    output_tokens: u64,
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
+    #[serde(default)]
+    total_tokens: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -266,6 +330,9 @@ const DEFAULT_MAX_TOKENS: u32 = 32768;
 struct MessagesResponse {
     /// Generated content blocks.
     content: Vec<ContentBlock>,
+    /// Token usage (optional).
+    #[serde(default)]
+    usage: Option<Usage>,
 }
 
 /// A single content block in the response.
@@ -293,6 +360,8 @@ struct ContentBlock {
 ///   OpenAI mode defaults to `https://api.openai.com/v1` (e.g. SenseNova: `https://token.sensenova.cn/v1`)
 /// - `ACOS_LLM_MODEL` — defaults to `LongCat-2.0`
 /// - `ACOS_LLM_MAX_TOKENS` — max output tokens, defaults to 16384
+/// - `ACOS_LLM_TEMPERATURE` — sampling temperature (default: not sent)
+/// - `ACOS_LLM_TIMEOUT_SECONDS` — HTTP request timeout in seconds (default: none)
 #[derive(Debug, Clone)]
 pub struct LongCatClient {
     http: reqwest::Client,
@@ -300,6 +369,8 @@ pub struct LongCatClient {
     base_url: String,
     model: String,
     max_tokens: u32,
+    temperature: Option<f64>,
+    timeout_seconds: Option<u64>,
     provider: Provider,
 }
 
@@ -341,12 +412,25 @@ impl LongCatClient {
             .and_then(|v| v.trim().parse().ok())
             .unwrap_or(DEFAULT_MAX_TOKENS);
 
+        let temperature = std::env::var("ACOS_LLM_TEMPERATURE")
+            .ok()
+            .and_then(|v| v.trim().parse().ok());
+
+        let timeout_seconds = std::env::var("ACOS_LLM_TIMEOUT_SECONDS")
+            .ok()
+            .and_then(|v| v.trim().parse().ok());
+
+        let mut http_builder = reqwest::Client::builder()
+            // SenseNova gateway rejects HTTP/2 requests (lowercase
+            // `authorization` header not recognized -> 401 Forbidden).
+            // Force HTTP/1.1; harmless for Anthropic/LongCat.
+            .http1_only();
+        if let Some(secs) = timeout_seconds {
+            http_builder = http_builder.timeout(Duration::from_secs(secs));
+        }
+
         Ok(Self {
-            http: reqwest::Client::builder()
-                // SenseNova gateway rejects HTTP/2 requests (lowercase
-                // `authorization` header not recognized -> 401 Forbidden).
-                // Force HTTP/1.1; harmless for Anthropic/LongCat.
-                .http1_only()
+            http: http_builder
                 .build()
                 .map_err(|e| AcosError::ExternalSystemFailure {
                     message: format!("http client init failed: {e}"),
@@ -356,6 +440,8 @@ impl LongCatClient {
             base_url,
             model,
             max_tokens,
+            temperature,
+            timeout_seconds,
             provider,
         })
     }
@@ -369,6 +455,8 @@ impl LongCatClient {
             base_url: "http://127.0.0.1:1".into(),
             model: "dummy".into(),
             max_tokens: DEFAULT_MAX_TOKENS,
+            temperature: None,
+            timeout_seconds: None,
             provider: Provider::Anthropic,
         }
     }
@@ -388,6 +476,26 @@ impl LongCatClient {
             )
             .await?;
         Ok(resp.text)
+    }
+
+    /// Sends a single-turn chat completion, returning the text and the
+    /// token usage reported by the provider (0 fields when absent).
+    pub async fn complete_with_usage(
+        &self,
+        system: &str,
+        user: &str,
+    ) -> Result<(String, TokenUsage), AcosError> {
+        let resp = self
+            .chat_with_tools(
+                system,
+                &[ChatMessage {
+                    role: "user".into(),
+                    content: MessageContent::Text(user.into()),
+                }],
+                None,
+            )
+            .await?;
+        Ok((resp.text, resp.usage))
     }
 
     /// Sends a chat completion with native tool calling support.
@@ -418,6 +526,7 @@ impl LongCatClient {
             system: system.to_string(),
             messages: messages.to_vec(),
             tools: tools.map(|t| t.to_vec()),
+            temperature: self.temperature,
         };
 
         let url = format!("{}/v1/messages", self.base_url);
@@ -475,7 +584,11 @@ impl LongCatClient {
             }
         }
 
-        Ok(ChatResponse { text, tool_calls })
+        Ok(ChatResponse {
+            text,
+            tool_calls,
+            usage: parsed.usage.as_ref().map(TokenUsage::from_anthropic).unwrap_or_default(),
+        })
     }
 
     async fn chat_openai(
@@ -528,6 +641,7 @@ impl LongCatClient {
             max_tokens: self.max_tokens,
             messages: openai_messages,
             tools: tool_defs,
+            temperature: self.temperature,
         };
 
         let url = format!("{}/chat/completions", self.base_url);
@@ -582,12 +696,23 @@ impl LongCatClient {
         Ok(ChatResponse {
             text: message.content.unwrap_or_default(),
             tool_calls,
+            usage: parsed.usage.as_ref().map(TokenUsage::from_openai).unwrap_or_default(),
         })
     }
 
     /// Returns the configured model id.
     pub fn model(&self) -> &str {
         &self.model
+    }
+
+    /// Returns the configured sampling temperature (None if not set).
+    pub fn temperature(&self) -> Option<f64> {
+        self.temperature
+    }
+
+    /// Returns the configured request timeout in seconds (None if not set).
+    pub fn timeout_seconds(&self) -> Option<u64> {
+        self.timeout_seconds
     }
 }
 
@@ -625,6 +750,7 @@ mod tests {
                 name: "read_file".into(),
                 input: serde_json::json!({"path": "data.csv"}),
             }],
+            usage: TokenUsage::default(),
         };
         assert!(resp.has_tool_calls());
     }
@@ -643,7 +769,7 @@ mod tests {
     }
 
     #[test]
-    fn openai_response_parses_tool_calls() {
+    fn openai_response_parses_tool_calls_and_usage() {
         let json = r#"{
             "choices": [{
                 "message": {
@@ -654,7 +780,8 @@ mod tests {
                         "function": { "name": "read_file", "arguments": "{\"path\": \"data.csv\"}" }
                     }]
                 }
-            }]
+            }],
+            "usage": { "prompt_tokens": 10, "completion_tokens": 7, "total_tokens": 17 }
         }"#;
         let parsed: ChatCompletionsResponse = serde_json::from_str(json).unwrap();
         let message = parsed.choices.into_iter().next().unwrap().message;
@@ -662,6 +789,10 @@ mod tests {
         assert_eq!(message.tool_calls.len(), 1);
         assert_eq!(message.tool_calls[0].id, "call_1");
         assert_eq!(message.tool_calls[0].function.name, "read_file");
+        let usage = TokenUsage::from_openai(parsed.usage.as_ref().unwrap());
+        assert_eq!(usage.prompt_tokens, 10);
+        assert_eq!(usage.completion_tokens, 7);
+        assert_eq!(usage.total_tokens, 17);
     }
 
     #[test]
@@ -682,6 +813,7 @@ mod tests {
                     parameters: serde_json::json!({"type": "object"}),
                 },
             }]),
+            temperature: Some(0.0),
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["messages"][0]["role"], "system");

@@ -113,11 +113,11 @@ timestamp_note:
     - 2026-09-05
     - 2026-09-06
   expected_local_date: 2026-08-20
-  interpretation: "Host clock skew suspected; raw trace timestamps preserved."
-  corrective_action: "Future v0.4-R2 metadata must record host clock sanity."
+  interpretation: "Probe date-conversion bug (days_to_date 365-day approximation drifted ~2 weeks); host clock was NOT the cause. Raw trace timestamps preserved."
+  corrective_action: "v0.4-R2 probe uses correct proleptic-Gregorian UTC conversion; future metadata must record clock sanity (ACOS_EXP_CLOCK_SANITY)."
 ```
 
-原始 trace 时间戳（S2: 2026-09-05T16:xxZ、S3: 2026-09-06T01:xxZ）为实验原始证据，**保留不修改**；本次记录仅用于标注异常，供论文/复现时知晓时间戳未经人为篡改。
+原始 trace 时间戳（S2: 2026-09-05T16:xxZ、S3: 2026-09-06T01:xxZ）为实验原始证据，**保留不修改**；异常根因已在 v0.4-R2 中定位为探针 `days_to_date()` 日期换算 bug（非主机时钟偏差）并在 R2 探针修复。本记录仅用于标注异常，供论文/复现时知晓时间戳未经人为篡改。
 
 ## 7. Findings
 

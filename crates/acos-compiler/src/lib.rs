@@ -556,6 +556,8 @@ pub struct CompileTrace {
     pub plan: Option<PlanIR>,
     /// Wall-clock timings (milliseconds).
     pub timing: CompileTiming,
+    /// Token usage accumulated across all LLM calls (P1-5B v0.4-R2).
+    pub usage: acos_llm::TokenUsage,
 }
 
 /// A single repair attempt's captured data.
@@ -824,14 +826,20 @@ impl ModelCompiler {
             final_error: None,
             plan: None,
             timing: CompileTiming::default(),
+            usage: acos_llm::TokenUsage::default(),
         };
         let total_start = std::time::Instant::now();
         let mut diagnostics: Vec<Diagnostic> = vec![];
 
         // Initial attempt
         let init_start = std::time::Instant::now();
-        let raw = match self.llm.complete(PLANNER_SYSTEM_PROMPT, &user_prompt).await {
-            Ok(r) => r,
+        let raw = match self.llm.complete_with_usage(PLANNER_SYSTEM_PROMPT, &user_prompt).await {
+            Ok((r, u)) => {
+                trace.usage.prompt_tokens += u.prompt_tokens;
+                trace.usage.completion_tokens += u.completion_tokens;
+                trace.usage.total_tokens += u.total_tokens;
+                r
+            }
             Err(e) => {
                 trace.timing.total_ms = total_start.elapsed().as_millis() as u64;
                 trace.final_error = Some(e.to_string());
@@ -888,8 +896,11 @@ impl ModelCompiler {
                     });
 
                     let repair_start = std::time::Instant::now();
-                    match self.llm.complete(PLANNER_SYSTEM_PROMPT, &repair_prompt).await {
-                        Ok(retry_raw) => {
+                    match self.llm.complete_with_usage(PLANNER_SYSTEM_PROMPT, &repair_prompt).await {
+                        Ok((retry_raw, u)) => {
+                            trace.usage.prompt_tokens += u.prompt_tokens;
+                            trace.usage.completion_tokens += u.completion_tokens;
+                            trace.usage.total_tokens += u.total_tokens;
                             trace.timing.repair_llm_ms += repair_start.elapsed().as_millis() as u64;
                             match self.parse_cir(&retry_raw, task_id) {
                                 Ok(program) => {
@@ -1142,13 +1153,19 @@ impl ModelCompiler {
             final_error: None,
             plan: None,
             timing: CompileTiming::default(),
+            usage: acos_llm::TokenUsage::default(),
         };
         let total_start = std::time::Instant::now();
         let mut diagnostics: Vec<Diagnostic> = vec![];
 
         let init_start = std::time::Instant::now();
-        let raw = match self.llm.complete(&system_prompt, &user_prompt).await {
-            Ok(r) => r,
+        let raw = match self.llm.complete_with_usage(&system_prompt, &user_prompt).await {
+            Ok((r, u)) => {
+                trace.usage.prompt_tokens += u.prompt_tokens;
+                trace.usage.completion_tokens += u.completion_tokens;
+                trace.usage.total_tokens += u.total_tokens;
+                r
+            }
             Err(e) => {
                 trace.timing.total_ms = total_start.elapsed().as_millis() as u64;
                 trace.final_error = Some(e.to_string());
@@ -1218,8 +1235,11 @@ impl ModelCompiler {
                     });
 
                     let repair_start = std::time::Instant::now();
-                    match self.llm.complete(&system_prompt, &repair_prompt).await {
-                        Ok(retry_raw) => {
+                    match self.llm.complete_with_usage(&system_prompt, &repair_prompt).await {
+                        Ok((retry_raw, u)) => {
+                            trace.usage.prompt_tokens += u.prompt_tokens;
+                            trace.usage.completion_tokens += u.completion_tokens;
+                            trace.usage.total_tokens += u.total_tokens;
                             trace.timing.repair_llm_ms += repair_start.elapsed().as_millis() as u64;
                             match self.parse_plan(&retry_raw) {
                                 Ok(plan) => {

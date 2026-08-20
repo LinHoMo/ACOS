@@ -24,7 +24,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 use acos_compiler::ModelCompiler;
 use acos_core::schema::from_yaml;
@@ -76,6 +76,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("[warn] .env not loaded: {e}");
     }
 
+    // P1-5B v0.4-R2: provider pre-flight — one minimal completion to record
+    // quota_status before the run loop (a quota/rate-limit change during a
+    // session is an experiment-condition change, not infrastructure noise).
+    let quota_status = preflight_provider().await;
+    println!("  provider preflight: {quota_status}");
+
     let task_spec = read_task_spec(&task_path).await?;
     let ground_truth = GroundTruth::from_yaml(&gt_path)
         .map_err(|e| format!("failed to load ground truth from {gt_path}: {e}"))?;
@@ -109,6 +115,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for run_idx in start_index..start_index + runs {
         let run_start = Instant::now();
+        let clock_utc = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
         println!("── Run {run_idx}/{runs} ──");
 
         let mut compiler = ModelCompiler::from_env()
@@ -215,9 +225,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             std::process::exit(1);
         }
+
+        let observed = scan_http_codes(&traced.trace.initial_error)
+            .into_iter()
+            .chain(scan_http_codes(&traced.trace.final_error))
+            .collect::<Vec<_>>();
+        let metadata = build_metadata(&quota_status, &observed, clock_utc);
         let trace_json = build_trace_json(
             run_idx, &task_path, &traced, compile_ok,
             run_start.elapsed().as_millis() as u64, behavioral, execution, contract,
+            metadata,
         );
         tokio::fs::write(&trace_path, trace_json).await?;
         println!("  trace saved: {}", trace_path.display());
@@ -391,6 +408,87 @@ fn get_arg(args: &[String], key: &str) -> Option<String> {
     args.iter().position(|a| a == key).and_then(|i| args.get(i + 1)).cloned()
 }
 
+/// P1-5B v0.4-R2: one minimal completion to verify the provider/quota regime
+/// before the run loop. Returns `"ok"` or `"failed:<detail>"` (detail
+/// truncated to 120 chars, HTTP status codes preserved).
+async fn preflight_provider() -> String {
+    match acos_llm::LongCatClient::from_env() {
+        Ok(client) => match client.complete("You are a connectivity check.", "Reply with exactly: OK").await {
+            Ok(text) => {
+                if text.trim() == "OK" {
+                    "ok".to_string()
+                } else {
+                    format!("ok-but-unexpected:{:?}", text.chars().take(40).collect::<String>())
+                }
+            }
+            Err(e) => {
+                let detail = e.to_string();
+                let truncated: String = detail.chars().take(120).collect();
+                let status = scan_http_codes(&Some(detail)).first().copied();
+                match status {
+                    Some(code) => format!("failed:{code}"),
+                    None => format!("failed:{truncated}"),
+                }
+            }
+        },
+        Err(e) => format!("failed:{e}"),
+    }
+}
+
+/// Extracts 4xx/5xx HTTP status codes from an error string (e.g.
+/// "LLM API error 429: ...").
+fn scan_http_codes(err: &Option<String>) -> Vec<u32> {
+    let mut codes = Vec::new();
+    if let Some(s) = err {
+        let bytes: Vec<char> = s.chars().collect();
+        for w in bytes.windows(3) {
+            if w[0].is_ascii_digit() && w[1].is_ascii_digit() && w[2].is_ascii_digit() {
+                let code: u32 = format!("{}{}{}", w[0], w[1], w[2]).parse().unwrap_or(0);
+                if (400..600).contains(&code) && !codes.contains(&code) {
+                    codes.push(code);
+                }
+            }
+        }
+    }
+    codes
+}
+
+/// P1-5B v0.4-R2: builds the per-run `metadata` block (§7 of the R2 spec).
+/// Every field is populated automatically from the environment / runtime
+/// observations — no manual entry.
+fn build_metadata(quota_status: &str, observed: &[u32], clock_utc: u64) -> serde_json::Value {
+    let env_str = |key: &str, default: &str| std::env::var(key).unwrap_or_else(|_| default.to_string());
+    let key_present = ["LONGCAT_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
+        .iter()
+        .any(|k| std::env::var(k).map(|v| !v.trim().is_empty()).unwrap_or(false));
+    let rate_limit = observed.iter().filter(|&&c| c == 429).count();
+    serde_json::json!({
+        "experiment": {
+            "commit": env_str("ACOS_EXP_COMMIT", "unknown"),
+            "provider": env_str("ACOS_LLM_PROVIDER", "anthropic"),
+            "model": env_str("ACOS_LLM_MODEL", "LongCat-2.0"),
+            "temperature": env_str("ACOS_LLM_TEMPERATURE", "unset"),
+            "max_tokens": env_str("ACOS_LLM_MAX_TOKENS", "default"),
+            "timeout_seconds": env_str("ACOS_LLM_TIMEOUT_SECONDS", "default"),
+        },
+        "environment": {
+            "os": std::env::consts::OS,
+            "timezone": env_str("TZ", "system-local"),
+            "clock_utc": clock_utc,
+            "clock_sanity_check": env_str("ACOS_EXP_CLOCK_SANITY", "unchecked"),
+        },
+        "limits": {
+            "quota_status": quota_status,
+            "rate_limit_status": rate_limit,
+            "observed_events": observed,
+        },
+        "security": {
+            "key_present": key_present,
+            "raw_key_persisted": false,
+        },
+    })
+}
+
 fn try_load_env() -> Result<(), Box<dyn std::error::Error>> {
     let content = std::fs::read_to_string(".env")?;
     for line in content.lines() {
@@ -426,20 +524,29 @@ fn iso_timestamp() -> String {
     format!("{}T{h:02}:{m:02}:{s:02}Z", days_to_date(days))
 }
 
-/// Approximate date from days since epoch (good enough for trace ordering).
+/// Converts days since UNIX_EPOCH to a real proleptic-Gregorian date string
+/// (civil_from_days, Howard Hinnant's algorithm). v0.4 used a 365-day
+/// approximation here that drifted up to ~2 weeks (Aug 19 rendered as
+/// "2026-09-05"), which produced the v0.4 trace timestamp anomaly.
 fn days_to_date(days: u64) -> String {
-    let year = 1970u64 + days / 365;
-    let day_of_year = days % 365;
-    let month = day_of_year / 30 + 1;
-    let day = day_of_year % 30 + 1;
-    format!("{year}-{month:02}-{day:02}")
+    let z = days as i64 + 719468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if m <= 2 { y + 1 } else { y };
+    format!("{year:04}-{m:02}-{d:02}")
 }
 
 #[allow(clippy::too_many_arguments)]
 fn build_trace_json(
     run_idx: usize, task_path: &str, traced: &acos_compiler::TracedCompile,
     compile_success: bool, wall_ms: u64, behavioral: Option<serde_json::Value>,
-    execution: serde_json::Value, contract: serde_json::Value,
+    execution: serde_json::Value, contract: serde_json::Value, metadata: serde_json::Value,
 ) -> String {
     let t = &traced.trace;
     let program = traced.result.as_ref().ok().map(|r| &r.program);
@@ -501,7 +608,9 @@ fn build_trace_json(
         "behavioral_analysis": behavioral,
         "execution": execution,
         "timing": { "initial_llm_ms": t.timing.initial_llm_ms, "repair_llm_ms": t.timing.repair_llm_ms, "total_compile_ms": t.timing.total_ms, "total_wall_ms": wall_ms },
+        "usage": { "prompt_tokens": t.usage.prompt_tokens, "completion_tokens": t.usage.completion_tokens, "total_tokens": t.usage.total_tokens },
         "repair_tax": { "first_pass_success": t.initial_error.is_none(), "repair_attempts_used": t.repair_attempts.len(), "repair_latency_ms": t.timing.repair_llm_ms },
+        "metadata": metadata,
     });
     serde_json::to_string_pretty(&record).unwrap_or_default()
 }
@@ -517,4 +626,43 @@ fn count_step_kind(steps: &[acos_compiler::plan::PlanStep], kind: &str) -> usize
         };
         acc + usize::from(mine == kind) + count_step_kind(&s.body, kind)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn days_to_date_known_epoch_anchors() {
+        assert_eq!(days_to_date(0), "1970-01-01");
+        assert_eq!(days_to_date(19_723), "2024-01-01");
+        assert_eq!(days_to_date(20_684), "2026-08-19");
+        assert_eq!(days_to_date(20_685), "2026-08-20");
+        assert_eq!(days_to_date(20_336), "2025-09-05");
+    }
+
+    #[test]
+    fn days_to_date_leap_year_february() {
+        assert_eq!(days_to_date(19_754), "2024-02-01");
+        assert_eq!(days_to_date(19_782), "2024-02-29");
+        assert_eq!(days_to_date(19_783), "2024-03-01");
+    }
+
+    #[test]
+    fn scan_http_codes_extracts_4xx_5xx() {
+        assert_eq!(
+            scan_http_codes(&Some("LLM API error 429: too many requests".into())),
+            vec![429]
+        );
+        assert_eq!(
+            scan_http_codes(&Some("LLM API error 402: quota".into())),
+            vec![402]
+        );
+        assert_eq!(
+            scan_http_codes(&Some("LLM API error 500: engine".into())),
+            vec![500]
+        );
+        assert_eq!(scan_http_codes(&Some("all fine".into())), Vec::<u32>::new());
+        assert_eq!(scan_http_codes(&None), Vec::<u32>::new());
+    }
 }
