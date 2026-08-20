@@ -1,0 +1,26 @@
+﻿{
+    "experiment":  {
+                       "id":  "p1-5b-v0.4-r2",
+                       "commit":  "3e9ef41356af26339814751b74546f59bdced3b2",
+                       "provider":  "openai",
+                       "model":  "deepseek-v4-flash",
+                       "temperature":  "0.0",
+                       "max_tokens":  "32768",
+                       "timeout_seconds":  "600"
+                   },
+    "environment":  {
+                        "os":  "windows",
+                        "timezone":  null,
+                        "session_start_utc":  "2026-08-20T04:37:43.7759953Z",
+                        "clock_sanity_check":  "unverified"
+                    },
+    "design":  {
+                   "control":  "serialization_teaching_only (S1 config; old execution binding)",
+                   "treatment":  "serialization_teaching + structured_inputs (S3 config; inputs injection + env prohibition)",
+                   "runs_per_arm":  10,
+                   "task":  "tests/benchmarks/p1/flagship_csv_quality/acos_task.yaml",
+                   "gt":  "tests/benchmarks/p1/flagship_csv_quality/expected/ground_truth.yaml",
+                   "single_variable":  "Structured Inputs Package"
+               },
+    "verdict":  "H-E INCONCLUSIVE"
+}

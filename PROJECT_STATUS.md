@@ -207,6 +207,12 @@ Execution
   - 瓶颈收敛：从"CIR 编译"推进到"Primitive Invocation 最后一公里（implementation binding）"
   - 报告：`experiments/p1-5b-cognitive-program-discovery/summary-v0.4.md`（FROZEN）；S1 提交 `3194f9f`；S2/S3 traces 未追踪保留
   - 下一步：不补跑；如需重测 S3 → 另立 v0.4-R2（冻结模型/供应商/额度/Prompt/温度/超时）；研究目标 = Primitive Invocation 机器可约束接口（模型只选 capability+arguments，不拼 Python）
+- [x] **P1-5B v0.4-R2 Structured Execution Binding (H-E) Controlled** ⚠️ Batch 1 INVALID / INFRA-CONFOUNDED · Batch 2 PENDING（2026-08-20）
+  - 设计：单一变量 Control（`--serialization-teaching` ×10）vs Treatment（`--serialization-teaching --structured-inputs` ×10）；spec `docs/specs/2026-08-20-p1-5b-v0.4-r2-structured-execution-binding-controlled-design.md` FROZEN @ `3e9ef41`（temperature 0.0 / max_tokens 32768 / timeout 600 / deepseek-v4-flash）
+  - **Batch 1（归档 `experiments/p1-5b-cognitive-program-discovery/formal-eval-v0.4-r2-batch1/`，不可修改）**：Control n=1 可计数（compile/contract PASS、execute FAIL SyntaxError、env_persistence 100%、binding 0%——复现 S1 签名，仅 n=1 不作统计）；Treatment n=0。**H-E INCONCLUSIVE（Treatment n=0 due to provider quota exhaustion; not testable in Batch 1）**，判定为 INVALID / INFRA-CONFOUNDED，不用于 H-E 推断
+  - **INFRA-001**：会话级 `LONGCAT_API_KEY`（legacy ak_）覆盖 `.env` SenseNova key（sk_）→ 全线 401 code 16；启动时清除会话变量后恢复（零代码改动）；已记录 key_present=true / raw_key_persisted=false
+  - **INFRA-002**：run-001 消耗 32,847 tokens 后 `429001 inference tpm exhausted` → 剩余 19 run 全部 external；当前 provider quota regime 不支持连续 20 个 32k-token run（与 v0.4 S3/S1 同类混杂）；未改 max_tokens/模型/Prompt/harness
+  - **Batch 2（PENDING）**：条件 = credential_source 正确 + quota preflight PASS + clock sanity verified；分块调度（Control 5 → 检查 → Control 5 → Treatment 5 → 检查 → Treatment 5），每块检查 observed_events 后再继续；判定门按冻结 spec 不变
 
 **ACOS 能力图谱（v0.1 实测后）**：
 ```text

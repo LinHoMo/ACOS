@@ -1,0 +1,46 @@
+{
+  "experiment": "p1-5b-v0.4-r2",
+  "batch": 1,
+  "status": "INVALID / INFRA-CONFOUNDED",
+  "verdict": "H-E INCONCLUSIVE",
+  "verdict_reason": "Treatment n=0 due to provider quota exhaustion (429001 tpm exhausted); H-E not testable in Batch 1. Not a pass, not a fail.",
+  "frozen_commit": "3e9ef41356af26339814751b74546f59bdced3b2",
+  "infra_events": [
+    {
+      "id": "INFRA-001",
+      "type": "credential_source_precedence",
+      "detail": "Session-level LONGCAT_API_KEY (legacy, ak_) overrode .env SenseNova key (sk_); all requests rejected 401 code 16 before fix. Resolved at launch time (session var removed, .env loaded); zero code changes.",
+      "recorded_in": "metadata.security.key_present=true, raw_key_persisted=false"
+    },
+    {
+      "id": "INFRA-002",
+      "type": "provider_quota_regime",
+      "detail": "run-001 consumed 32847 tokens; runs 002-020 failed instantly with 429001 inference tpm exhausted. observed_events=[429] recorded per run; run-001 also saw transient 424 (recovered).",
+      "recorded_in": "metadata.limits.observed_events"
+    }
+  ],
+  "countable_runs": { "control": 1, "treatment": 0 },
+  "control_evidence_n1": {
+    "compile": "pass",
+    "contract": "pass",
+    "execute": "fail (SyntaxError: unexpected character after line continuation character in generated python)",
+    "env_refs": 8,
+    "env_persistence_rate": 1.0,
+    "inputs_refs": 0,
+    "binding_adoption_rate": 0.0,
+    "repairs": 3,
+    "total_tokens": 32847,
+    "wall_ms": 226971,
+    "observed_events": [424]
+  },
+  "batch2_plan": {
+    "status": "PENDING",
+    "required_n": "10 + 10",
+    "start_gates": [
+      "credential_source = expected provider (session LONGCAT_API_KEY removed)",
+      "quota preflight = PASS",
+      "clock sanity = verified",
+      "chunked schedule: Control 5 -> quota check -> Control 5 -> Treatment 5 -> quota check -> Treatment 5"
+    ]
+  }
+}
